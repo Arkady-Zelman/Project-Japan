@@ -1,0 +1,26 @@
+{
+  "name": "jepx-storage",
+  "private": true,
+  "version": "0.0.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "worker:modal": "cd apps/worker && ./.venv/bin/python -m modal",
+    "worker:fmt": "cd apps/worker && ./.venv/bin/ruff format .",
+    "worker:lint": "cd apps/worker && ./.venv/bin/ruff check .",
+    "worker:mypy": "cd apps/worker && ./.venv/bin/mypy ."
+  },
+  "devDependencies": {
+    "turbo": "^2.3.3"
+  },
+  "packageManager": "npm@10.8.2",
+  "engines": {
+    "node": ">=20"
+  }
+}

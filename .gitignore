@@ -1,0 +1,52 @@
+# Dependencies
+node_modules/
+.pnp/
+.pnp.js
+
+# Build outputs
+.next/
+.turbo/
+out/
+dist/
+build/
+*.tsbuildinfo
+
+# Env files (never commit)
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# IDE
+.idea/
+
+# Claude Code per-machine state (settings.local.json is by convention not committed)
+.claude/settings.local.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Modal
+.modal/
+
+# Supabase CLI local state
+supabase/.temp/
+supabase/.branches/
+supabase/seed.sql

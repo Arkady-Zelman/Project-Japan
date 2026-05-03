@@ -1,0 +1,835 @@
+# JEPX-Storage data dictionary.
+#
+# One entry per (table, column) pair. Loaded into `public.data_dictionary` by
+# `apps/worker/seed/load_data_dictionary.py`. Read by the AI agent's
+# `describe_schema` tool at request time per BUILD_SPEC §9.3 line 1004 — every
+# answer the agent gives about schema, units, or column meaning is sourced here.
+#
+# Discipline: any column added to `001_init.sql` (or a future migration) MUST
+# come with a dictionary entry in the same change. Agent quality depends on it.
+#
+# Units note: Japanese power-market convention is JPY/kWh on prices (JEPX,
+# tariffs), JPY/MWh on costs (SRMC, fuel-cost-per-MWh in stack model). Always
+# multiply by 1000 between the two. Storage values: JPY total.
+
+# ==========================================================================
+# REFERENCE
+# ==========================================================================
+
+- table: areas
+  column: id
+  description: Internal UUID primary key for the JEPX area.
+- table: areas
+  column: code
+  description: Short code for the area — TK (Tokyo), KS (Kansai), HK (Hokkaido), TH (Tohoku), CB (Chubu), HR (Hokuriku), CG (Chugoku), SK (Shikoku), KY (Kyushu), SYS (Japan-wide system reference).
+  notes: Codes match those used by JEPX in their public CSVs.
+- table: areas
+  column: name_en
+  description: English long-form name (e.g. "Tokyo", "Kansai").
+- table: areas
+  column: name_jp
+  description: Japanese long-form name (e.g. "東京", "関西").
+- table: areas
+  column: tso
+  description: Transmission-system operator that owns the grid in this area (e.g. "TEPCO PG", "Kansai EPCO").
+- table: areas
+  column: timezone
+  description: IANA timezone — always "Asia/Tokyo" for Japan.
+
+- table: fuel_types
+  column: id
+  description: Internal UUID primary key for the fuel type.
+- table: fuel_types
+  column: code
+  description: Short code for the fuel — lng_ccgt, lng_steam, coal, oil, nuclear, solar, wind, hydro, geothermal, biomass, pumped_storage, battery.
+- table: fuel_types
+  column: name_en
+  description: English long-form fuel/technology name.
+
+- table: unit_types
+  column: id
+  description: Internal UUID primary key for the unit type.
+- table: unit_types
+  column: code
+  description: Short code for the unit type — ccgt, steam, ocgt, ic_diesel, hydro_run, hydro_dam, pumped_storage, vre.
+- table: unit_types
+  column: name_en
+  description: English long-form unit-type name. Distinguishes thermodynamic cycle / dispatch shape.
+
+- table: jp_holidays
+  column: date
+  description: Calendar date of the holiday (Asia/Tokyo).
+- table: jp_holidays
+  column: name_jp
+  description: Japanese name of the holiday, when known.
+- table: jp_holidays
+  column: name_en
+  description: English name of the holiday.
+- table: jp_holidays
+  column: category
+  description: Bucket — "national" (statutory), "obon" (mid-August window), "newyear" (Dec 30 – Jan 3), or "goldenweek" (Apr 29 – May 5).
+  notes: Demand patterns track these windows even when individual days are not statutory.
+
+# ==========================================================================
+# MARKET DATA (time-series ingest)
+# ==========================================================================
+
+- table: jepx_spot_prices
+  column: id
+  description: Surrogate bigserial primary key.
+- table: jepx_spot_prices
+  column: area_id
+  description: Area this price applies to. FK to areas.id.
+- table: jepx_spot_prices
+  column: slot_start
+  description: Start of the half-hour delivery slot, in UTC. JEPX days are 48 slots starting 00:00 JST (= 15:00 UTC the prior day).
+  unit: timestamptz
+- table: jepx_spot_prices
+  column: slot_end
+  description: End of the half-hour slot, exclusive.
+  unit: timestamptz
+- table: jepx_spot_prices
+  column: price_jpy_kwh
+  description: Cleared spot price for the slot.
+  unit: JPY/kWh
+  notes: Multiply by 1000 for JPY/MWh. JEPX day-ahead clearing convention.
+- table: jepx_spot_prices
+  column: sell_volume_mwh
+  description: Total sell-side bid volume submitted into the auction.
+  unit: MWh
+- table: jepx_spot_prices
+  column: buy_volume_mwh
+  description: Total buy-side bid volume submitted into the auction.
+  unit: MWh
+- table: jepx_spot_prices
+  column: contract_volume_mwh
+  description: Cleared (matched) volume.
+  unit: MWh
+- table: jepx_spot_prices
+  column: auction_type
+  description: day_ahead for the spot auction (closes 10:00 JST D-1); intraday for hour-ahead session.
+- table: jepx_spot_prices
+  column: source
+  description: Data source identifier — japanesepower_csv | jepx_csv | eex | ice.
+- table: jepx_spot_prices
+  column: ingested_at
+  description: Wall-clock time the row was inserted by the ingest worker. Used for audit trail.
+
+- table: demand_actuals
+  column: area_id
+  description: Area the demand reading applies to.
+- table: demand_actuals
+  column: slot_start
+  description: Half-hour slot start.
+  unit: timestamptz
+- table: demand_actuals
+  column: demand_mw
+  description: Realised area demand averaged over the slot.
+  unit: MW
+- table: demand_actuals
+  column: source
+  description: Originating dataset — typically OCCTO or area-TSO publication.
+- table: demand_actuals
+  column: ingested_at
+  description: Wall-clock insert time.
+
+- table: generation_mix_actuals
+  column: area_id
+  description: Area the row applies to.
+- table: generation_mix_actuals
+  column: slot_start
+  description: Half-hour slot start.
+  unit: timestamptz
+- table: generation_mix_actuals
+  column: fuel_type_id
+  description: Fuel/tech bucket — FK to fuel_types.id.
+- table: generation_mix_actuals
+  column: output_mw
+  description: Average dispatched output for this fuel in this slot.
+  unit: MW
+- table: generation_mix_actuals
+  column: curtailment_mw
+  description: Curtailed renewable output for this fuel in this slot, when reported.
+  unit: MW
+- table: generation_mix_actuals
+  column: source
+  description: Originating publication.
+- table: generation_mix_actuals
+  column: ingested_at
+  description: Wall-clock insert time.
+
+- table: interconnection_flows
+  column: from_area_id
+  description: Sending area for the interconnection.
+- table: interconnection_flows
+  column: to_area_id
+  description: Receiving area for the interconnection.
+- table: interconnection_flows
+  column: slot_start
+  description: Half-hour slot start.
+  unit: timestamptz
+- table: interconnection_flows
+  column: flow_mw
+  description: Net flow on the interconnection. Positive = from→to direction; negative means the flow was reversed in the slot.
+  unit: MW
+- table: interconnection_flows
+  column: source
+  description: Defaults to "occto" — Organization for Cross-regional Coordination of Transmission Operators.
+- table: interconnection_flows
+  column: ingested_at
+  description: Wall-clock insert time.
+
+- table: generators
+  column: id
+  description: Internal UUID primary key.
+- table: generators
+  column: name
+  description: Plant/unit name as published.
+- table: generators
+  column: operator
+  description: Operating company / utility.
+- table: generators
+  column: area_id
+  description: Area where the unit physically sits.
+- table: generators
+  column: unit_type_id
+  description: Unit-type taxonomy (ccgt, steam, etc.). Drives dispatch-shape assumptions.
+- table: generators
+  column: fuel_type_id
+  description: Fuel bucket the unit burns.
+- table: generators
+  column: capacity_mw
+  description: Nameplate gross capacity.
+  unit: MW
+- table: generators
+  column: efficiency
+  description: HHV thermal efficiency (e.g. 0.58 for a modern CCGT).
+  unit: dimensionless (0–1)
+  notes: Inverse of heat rate — 3600 / heat_rate_kj_kwh.
+- table: generators
+  column: heat_rate_kj_kwh
+  description: Heat rate — kJ of fuel input per kWh of electric output.
+  unit: kJ/kWh
+- table: generators
+  column: variable_om_jpy_mwh
+  description: Variable operations & maintenance cost per MWh dispatched.
+  unit: JPY/MWh
+- table: generators
+  column: co2_intensity_t_mwh
+  description: Direct CO₂ emissions per MWh of output. Used in SRMC when carbon is priced.
+  unit: t CO₂ / MWh
+- table: generators
+  column: commissioned
+  description: Date the unit entered commercial operation.
+- table: generators
+  column: retired
+  description: Date the unit was retired (null if still operating).
+- table: generators
+  column: notes
+  description: Free-form analyst notes (e.g. forced-outage history, dispatch quirks).
+- table: generators
+  column: metadata
+  description: Extensible JSON blob for fields not yet promoted to columns (latitude, owner share, operator-fleet group, etc.).
+
+- table: generator_availability
+  column: generator_id
+  description: FK to generators.id. Cascade-deletes with the parent unit.
+- table: generator_availability
+  column: slot_start
+  description: Half-hour slot start.
+  unit: timestamptz
+- table: generator_availability
+  column: available_mw
+  description: Available capacity in the slot — capacity minus outages and de-rates.
+  unit: MW
+- table: generator_availability
+  column: status
+  description: One of available | planned_outage | forced_outage | derated.
+- table: generator_availability
+  column: source
+  description: Originating dataset.
+
+- table: fuel_prices
+  column: fuel_type_id
+  description: FK to fuel_types.id.
+- table: fuel_prices
+  column: ts
+  description: Effective timestamp of the quote.
+  unit: timestamptz
+- table: fuel_prices
+  column: price
+  description: Quoted price; interpret with the `unit` column.
+- table: fuel_prices
+  column: unit
+  description: One of usd_mmbtu (LNG, common JKM convention), usd_t (coal), usd_bbl (oil).
+  notes: Convert to JPY/MWh in the SRMC step using fx_rates and fuel-specific thermal conversion.
+- table: fuel_prices
+  column: source
+  description: Quote source (CME JKM, Argus, etc.).
+- table: fuel_prices
+  column: ingested_at
+  description: Wall-clock insert time.
+
+- table: fx_rates
+  column: pair
+  description: Currency pair, ISO concatenated — typically "USDJPY".
+- table: fx_rates
+  column: ts
+  description: Effective timestamp.
+  unit: timestamptz
+- table: fx_rates
+  column: rate
+  description: Spot rate for the pair (units of the second currency per unit of the first).
+  notes: For USDJPY this is JPY per USD.
+- table: fx_rates
+  column: source
+  description: Data source — currently "frankfurter" (ECB-sourced via api.frankfurter.dev).
+
+- table: weather_obs
+  column: area_id
+  description: Area the observation/forecast applies to.
+- table: weather_obs
+  column: ts
+  description: Valid time of the observation or forecast issuance window.
+  unit: timestamptz
+- table: weather_obs
+  column: temp_c
+  description: Air temperature.
+  unit: °C
+- table: weather_obs
+  column: dewpoint_c
+  description: Dew-point temperature.
+  unit: °C
+- table: weather_obs
+  column: wind_mps
+  description: Wind speed at 10 m, average over the slot.
+  unit: m/s
+- table: weather_obs
+  column: ghi_w_m2
+  description: Global horizontal irradiance — shortwave radiation incident on a horizontal surface.
+  unit: W/m²
+- table: weather_obs
+  column: cloud_pct
+  description: Cloud cover, 0–100.
+  unit: percent
+- table: weather_obs
+  column: forecast_horizon_h
+  description: Lead-time of the forecast in hours. Zero means the row is an observation, not a forecast.
+  unit: hours
+- table: weather_obs
+  column: source
+  description: Dataset (Open-Meteo, JMA, etc.). Multiple sources for the same (area, ts, horizon) are allowed.
+
+# ==========================================================================
+# FUNDAMENTALS — stack model output
+# ==========================================================================
+
+- table: stack_curves
+  column: id
+  description: Internal UUID primary key.
+- table: stack_curves
+  column: area_id
+  description: Area the supply curve was built for.
+- table: stack_curves
+  column: slot_start
+  description: Half-hour slot the curve is for.
+  unit: timestamptz
+- table: stack_curves
+  column: curve_jsonb
+  description: Merit-order array — list of {mw_cumulative, srmc_jpy_mwh, generator_id} entries sorted ascending by SRMC. Step-function representation.
+  notes: SRMC is in JPY/MWh; multiply by 0.001 for JPY/kWh.
+- table: stack_curves
+  column: inputs_hash
+  description: SHA-256 of fuel prices, FX, availability, demand inputs used. Lets us detect when a re-build is necessary.
+- table: stack_curves
+  column: created_at
+  description: When the curve was built.
+
+- table: stack_clearing_prices
+  column: area_id
+  description: Area.
+- table: stack_clearing_prices
+  column: slot_start
+  description: Half-hour slot.
+  unit: timestamptz
+- table: stack_clearing_prices
+  column: modelled_price_jpy_mwh
+  description: Fundamental clearing price implied by the stack curve at the slot's modelled demand.
+  unit: JPY/MWh
+  notes: Compare to realised JEPX price (jepx_spot_prices.price_jpy_kwh × 1000) for backtest.
+- table: stack_clearing_prices
+  column: modelled_demand_mw
+  description: Demand level used to clear the curve.
+  unit: MW
+- table: stack_clearing_prices
+  column: marginal_unit_id
+  description: Generator that sets the price (the unit straddling the demand line). Null if demand exceeded the highest SRMC bid.
+- table: stack_clearing_prices
+  column: stack_curve_id
+  description: FK to the curve this clearing price came from.
+- table: stack_clearing_prices
+  column: created_at
+  description: When the row was written.
+
+# ==========================================================================
+# REGIME STATE — Janczura-Weron MRS
+# ==========================================================================
+
+- table: regime_states
+  column: area_id
+  description: Area the regime probabilities apply to.
+- table: regime_states
+  column: slot_start
+  description: Half-hour slot.
+  unit: timestamptz
+- table: regime_states
+  column: p_base
+  description: Smoothed posterior probability the slot is in the base (mean-reverting) regime.
+  unit: probability (0–1)
+- table: regime_states
+  column: p_spike
+  description: Smoothed posterior probability the slot is in the spike regime.
+  unit: probability (0–1)
+  notes: Higher in tight-supply periods (e.g. Jan/Feb 2021). Validation gate (BUILD_SPEC §12 M5) requires P(spike) ≥ 0.7 on ≥80% of Jan-Feb 2021 slots in TK and TH.
+- table: regime_states
+  column: p_drop
+  description: Smoothed posterior probability the slot is in the drop regime — solar-glut, very-low-price periods.
+  unit: probability (0–1)
+- table: regime_states
+  column: most_likely_regime
+  description: Argmax of the three probabilities.
+- table: regime_states
+  column: model_version
+  description: Tag for the MRS calibration that produced this row. Allows side-by-side comparison of refits.
+
+# ==========================================================================
+# MODELS & FORECASTS
+# ==========================================================================
+
+- table: models
+  column: id
+  description: Internal UUID primary key.
+- table: models
+  column: name
+  description: Human-readable model name (e.g. "vlstm_v3", "stack_2026q1").
+- table: models
+  column: type
+  description: One of vlstm | arima | stack | mrs | ensemble.
+- table: models
+  column: version
+  description: Operator-managed version string (e.g. "2026.04.30-1").
+- table: models
+  column: hyperparams
+  description: JSON blob of training-time hyperparameters (learning rate, dropout, hidden size, etc.).
+- table: models
+  column: training_window_start
+  description: Earliest timestamp included in the training set.
+  unit: timestamptz
+- table: models
+  column: training_window_end
+  description: Latest timestamp included in the training set (cutoff).
+  unit: timestamptz
+- table: models
+  column: metrics
+  description: JSON blob of evaluation metrics — RMSE, MAPE, CRPS by area and horizon.
+- table: models
+  column: artifact_url
+  description: Path inside Supabase Storage to the serialised model artefact.
+- table: models
+  column: status
+  description: training | ready | deprecated | failed.
+- table: models
+  column: created_at
+  description: When this model row was inserted.
+
+- table: forecast_runs
+  column: id
+  description: Internal UUID primary key for one forecast invocation.
+- table: forecast_runs
+  column: model_id
+  description: FK to the model used.
+- table: forecast_runs
+  column: area_id
+  description: Area the forecast was generated for.
+- table: forecast_runs
+  column: forecast_origin
+  description: Now-timestamp at which the forecast was issued — all paths project forward from here.
+  unit: timestamptz
+- table: forecast_runs
+  column: horizon_slots
+  description: Number of half-hour slots forecast (typically 48 = 24 hours).
+- table: forecast_runs
+  column: n_paths
+  description: Number of Monte-Carlo paths drawn (typically 1000 for VLSTM with MC Dropout).
+- table: forecast_runs
+  column: created_at
+  description: Wall-clock when this run was inserted.
+
+- table: forecast_paths
+  column: forecast_run_id
+  description: FK to forecast_runs.id. Cascade-deletes with the parent run.
+- table: forecast_paths
+  column: path_id
+  description: Path index within the run (0 to n_paths−1).
+- table: forecast_paths
+  column: slot_start
+  description: Half-hour slot the price applies to.
+  unit: timestamptz
+- table: forecast_paths
+  column: price_jpy_kwh
+  description: Sampled price for this (path, slot).
+  unit: JPY/kWh
+  notes: Temporal correlation across slots within a path is preserved — never average across paths to get a "best estimate" without preserving variance.
+
+# ==========================================================================
+# USER & ASSET STATE (RLS-protected)
+# ==========================================================================
+
+- table: portfolios
+  column: id
+  description: Internal UUID primary key.
+- table: portfolios
+  column: user_id
+  description: Owner — FK to auth.users.id. Cascade-deletes with the user.
+- table: portfolios
+  column: name
+  description: Portfolio display name.
+- table: portfolios
+  column: description
+  description: Free-form notes on the portfolio.
+- table: portfolios
+  column: created_at
+  description: Insert time.
+- table: portfolios
+  column: updated_at
+  description: Last-edited time.
+
+- table: assets
+  column: id
+  description: Internal UUID primary key.
+- table: assets
+  column: portfolio_id
+  description: FK to portfolios.id. Cascade-deletes with the portfolio.
+- table: assets
+  column: user_id
+  description: Owner — denormalised here so RLS can filter without subquery.
+- table: assets
+  column: name
+  description: Asset display name.
+- table: assets
+  column: asset_type
+  description: One of bess_li_ion | pumped_hydro | compressed_air.
+- table: assets
+  column: area_id
+  description: Area the asset is connected to.
+- table: assets
+  column: power_mw
+  description: Rated power capacity (charge and discharge symmetric in v1).
+  unit: MW
+- table: assets
+  column: energy_mwh
+  description: Rated energy capacity. Duration = energy_mwh / power_mw.
+  unit: MWh
+- table: assets
+  column: round_trip_eff
+  description: AC-to-AC round-trip efficiency. Applied symmetrically (sqrt on each leg).
+  unit: dimensionless (0–1)
+- table: assets
+  column: max_cycles_per_year
+  description: Optional cycle-life cap. The LSM optimiser respects this if set.
+- table: assets
+  column: degradation_jpy_mwh
+  description: Per-MWh-throughput degradation cost (e.g. battery cell wear).
+  unit: JPY/MWh
+- table: assets
+  column: soc_min_pct
+  description: Minimum allowed state of charge as a fraction (e.g. 0.10).
+  unit: dimensionless (0–1)
+- table: assets
+  column: soc_max_pct
+  description: Maximum allowed state of charge as a fraction (e.g. 0.95).
+  unit: dimensionless (0–1)
+- table: assets
+  column: commissioned
+  description: Date the asset entered service (or planned date for pre-commissioning).
+- table: assets
+  column: metadata
+  description: Extensible JSON blob.
+- table: assets
+  column: created_at
+  description: Insert time.
+
+- table: valuations
+  column: id
+  description: Internal UUID primary key for one valuation run.
+- table: valuations
+  column: asset_id
+  description: FK to assets.id. Cascade-deletes with the asset.
+- table: valuations
+  column: user_id
+  description: Owner — denormalised for RLS.
+- table: valuations
+  column: forecast_run_id
+  description: FK to forecast_runs.id (for LSM/extrinsic valuations). Null for pure intrinsic.
+- table: valuations
+  column: method
+  description: lsm | intrinsic | rolling_intrinsic.
+- table: valuations
+  column: status
+  description: queued | running | done | failed. Frontend subscribes to changes via Realtime.
+- table: valuations
+  column: horizon_start
+  description: Inclusive start of the valuation horizon.
+  unit: timestamptz
+- table: valuations
+  column: horizon_end
+  description: Exclusive end of the valuation horizon.
+  unit: timestamptz
+- table: valuations
+  column: intrinsic_value_jpy
+  description: Value capturable from the realised forward curve / intrinsic dispatch only.
+  unit: JPY (total)
+- table: valuations
+  column: extrinsic_value_jpy
+  description: Optionality value above intrinsic — comes from re-dispatching against forecast paths.
+  unit: JPY (total)
+  notes: total_value = intrinsic + extrinsic. Always non-negative.
+- table: valuations
+  column: total_value_jpy
+  description: Total expected storage value over the horizon.
+  unit: JPY (total)
+- table: valuations
+  column: ci_lower_jpy
+  description: Lower bound of the confidence interval on total_value (typically 5th percentile across paths).
+  unit: JPY (total)
+- table: valuations
+  column: ci_upper_jpy
+  description: Upper bound (typically 95th percentile).
+  unit: JPY (total)
+- table: valuations
+  column: basis_functions
+  description: JSON spec of the LSM basis used (e.g. ["1","S","S^2","S^3","p_spike","p_spike*S"]). Default per BUILD_SPEC §8.3.
+- table: valuations
+  column: n_paths
+  description: Number of forecast paths consumed.
+- table: valuations
+  column: n_volume_grid
+  description: Discretisation of the SoC axis used in the LSM regression.
+- table: valuations
+  column: runtime_seconds
+  description: Wall-clock duration of the Modal LSM call.
+  unit: seconds
+- table: valuations
+  column: error
+  description: Stack trace or error message if status = failed.
+- table: valuations
+  column: created_at
+  description: When the valuation was queued.
+- table: valuations
+  column: completed_at
+  description: When the valuation finished (done or failed).
+
+- table: valuation_decisions
+  column: valuation_id
+  description: FK to valuations.id. Cascade-deletes with the valuation.
+- table: valuation_decisions
+  column: slot_start
+  description: Half-hour slot.
+  unit: timestamptz
+- table: valuation_decisions
+  column: soc_mwh
+  description: State of charge at the start of the slot.
+  unit: MWh
+- table: valuation_decisions
+  column: action_mw
+  description: Average action over the slot — positive = charge from grid, negative = discharge to grid.
+  unit: MW
+- table: valuation_decisions
+  column: expected_pnl_jpy
+  description: Expected slot P&L given the action and forecast distribution.
+  unit: JPY
+
+- table: backtests
+  column: id
+  description: Internal UUID primary key.
+- table: backtests
+  column: asset_id
+  description: FK to the asset being backtested.
+- table: backtests
+  column: user_id
+  description: Owner.
+- table: backtests
+  column: model_id
+  description: FK to models.id when the strategy uses a model (e.g. lsm). Null for naive_spread.
+- table: backtests
+  column: strategy
+  description: lsm | intrinsic | rolling_intrinsic | naive_spread.
+- table: backtests
+  column: window_start
+  description: Inclusive start of the replay window.
+  unit: date
+- table: backtests
+  column: window_end
+  description: Exclusive end of the replay window.
+  unit: date
+- table: backtests
+  column: status
+  description: queued | running | done | failed.
+- table: backtests
+  column: realised_pnl_jpy
+  description: P&L the strategy actually produced against realised JEPX prices.
+  unit: JPY (total)
+- table: backtests
+  column: modelled_pnl_jpy
+  description: P&L the strategy expected ex-ante (from forecast / intrinsic curve).
+  unit: JPY (total)
+- table: backtests
+  column: slippage_jpy
+  description: realised − modelled. Signed — negative means the strategy underperformed expectations.
+  unit: JPY (total)
+- table: backtests
+  column: sharpe
+  description: Annualised Sharpe ratio of slot-level returns (geometric, no risk-free assumption).
+- table: backtests
+  column: max_drawdown_jpy
+  description: Largest peak-to-trough cumulative-P&L drawdown over the window.
+  unit: JPY
+- table: backtests
+  column: trades_jsonb
+  description: Per-slot decision log {slot_start, soc_mwh, action_mw, realised_price_jpy_kwh, pnl_jpy}.
+- table: backtests
+  column: error
+  description: Stack trace if status = failed.
+- table: backtests
+  column: created_at
+  description: When the backtest was queued.
+- table: backtests
+  column: completed_at
+  description: When the backtest finished.
+
+# ==========================================================================
+# AI AGENT STATE
+# ==========================================================================
+
+- table: chat_sessions
+  column: id
+  description: Internal UUID primary key.
+- table: chat_sessions
+  column: user_id
+  description: Session owner — FK to auth.users.id. Cascade-deletes with the user.
+- table: chat_sessions
+  column: title
+  description: Auto-generated or user-set session title.
+- table: chat_sessions
+  column: created_at
+  description: When the session was opened.
+
+- table: chat_messages
+  column: id
+  description: Internal UUID primary key.
+- table: chat_messages
+  column: session_id
+  description: FK to chat_sessions.id. Cascade-deletes with the session.
+- table: chat_messages
+  column: role
+  description: One of user | assistant | tool. Mirrors the OpenAI message role.
+- table: chat_messages
+  column: content
+  description: Plain-text message content (or tool result string).
+- table: chat_messages
+  column: tool_calls
+  description: JSON array of tool calls the assistant emitted on this turn (OpenAI function-calling format).
+- table: chat_messages
+  column: tool_results
+  description: JSON array of tool results — one per tool call, by id.
+- table: chat_messages
+  column: tokens_in
+  description: Prompt tokens for this turn (per-turn, not cumulative).
+- table: chat_messages
+  column: tokens_out
+  description: Completion tokens for this turn.
+- table: chat_messages
+  column: created_at
+  description: When the message was inserted.
+
+- table: agent_artifacts
+  column: id
+  description: Internal UUID primary key.
+- table: agent_artifacts
+  column: session_id
+  description: FK to chat_sessions.id. Cascade-deletes with the session.
+- table: agent_artifacts
+  column: user_id
+  description: Owner — denormalised for RLS.
+- table: agent_artifacts
+  column: type
+  description: One of chart | query_result | model_spec.
+- table: agent_artifacts
+  column: title
+  description: Human-readable title shown in the scratchpad.
+- table: agent_artifacts
+  column: spec_jsonb
+  description: Plotly figure spec, query result rows, or model spec — depending on `type`.
+- table: agent_artifacts
+  column: created_at
+  description: Insert time.
+- table: agent_artifacts
+  column: expires_at
+  description: When the artifact is auto-purged. Default +7 days; pinned artifacts are exempt.
+  unit: timestamptz
+- table: agent_artifacts
+  column: pinned
+  description: True keeps the artifact past its expiry.
+
+# ==========================================================================
+# DATA DICTIONARY (self-describing)
+# ==========================================================================
+
+- table: data_dictionary
+  column: table_name
+  description: Postgres table the entry describes.
+- table: data_dictionary
+  column: column_name
+  description: Postgres column the entry describes.
+- table: data_dictionary
+  column: description
+  description: One-line description suitable for the agent's `describe_schema` tool.
+- table: data_dictionary
+  column: unit
+  description: Unit of the column where applicable (JPY/kWh, MW, etc.).
+- table: data_dictionary
+  column: notes
+  description: Optional caveats — unit conversions, source provenance, validation gates.
+
+# ==========================================================================
+# AUDIT LOG
+# ==========================================================================
+
+- table: compute_runs
+  column: id
+  description: Internal UUID primary key.
+- table: compute_runs
+  column: kind
+  description: Free-form tag — lsm_valuation | forecast_inference | vlstm_train | mrs_calibrate | agent_tool_call | ingest_jepx | ingest_demand | ingest_weather | etc.
+- table: compute_runs
+  column: user_id
+  description: Owner if the run was user-initiated; null for system runs (ingest, scheduled training).
+- table: compute_runs
+  column: input
+  description: JSON blob describing the call — endpoint, args, hashes. Don't dump full payloads.
+- table: compute_runs
+  column: output
+  description: JSON blob with run metadata (rows written, latency breakdown). Don't dump full results.
+- table: compute_runs
+  column: status
+  description: queued | running | done | failed.
+- table: compute_runs
+  column: duration_ms
+  description: Wall-clock duration of the run.
+  unit: milliseconds
+- table: compute_runs
+  column: error
+  description: Stack trace or error string if status = failed.
+- table: compute_runs
+  column: created_at
+  description: When the run was queued.
