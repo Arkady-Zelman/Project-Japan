@@ -11,20 +11,25 @@ dependencies = [
     "psycopg[binary]>=3.2.13",
     "holidays>=0.50",
     "pyyaml>=6.0",
+    # M3 — Tier 1 ingest (HTTP fetch, retries, parsing, audit).
+    "httpx>=0.27",
+    "tenacity>=8.4",
+    "pandas>=2.2",
+    "sentry-sdk>=2.0",
 ]
 
 [project.optional-dependencies]
 # Heavier deps land at their respective milestones:
-# M3 ingest:    httpx, polars, supabase
 # M5 regime:    statsmodels
-# M6 vlstm:     torch, lightning, numpy, pandas, pyarrow
+# M6 vlstm:     torch, lightning, numpy, pyarrow
 # M7 lsm:       numba
-# M9 agent:     fastapi, openai, sqlglot, sentry-sdk
+# M9 agent:     fastapi, openai, sqlglot
 dev = [
     "ruff>=0.6",
     "mypy>=1.10",
     "pytest>=8.0",
     "types-PyYAML>=6.0",
+    "pandas-stubs>=2.2",
 ]
 
 [build-system]
@@ -32,7 +37,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["ingest", "stack", "regime", "vlstm", "lsm", "backtest", "agent", "seed"]
+packages = ["common", "ingest", "stack", "regime", "vlstm", "lsm", "backtest", "agent", "seed"]
 
 [tool.ruff]
 line-length = 100
