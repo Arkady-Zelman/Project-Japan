@@ -56,6 +56,8 @@ Things explicitly **NOT** in the v1 stack (do not add unless the spec is amended
 - Upstash Redis / any external cache — Supabase + Vercel KV are sufficient.
 - LangChain / LangGraph — the agent uses the OpenAI SDK directly.
 
+> **Deferred 2026-04-30:** shadcn/ui install was attempted in M1 and rolled back. The current shadcn registry (`base-nova`, v4) targets Tailwind v4 and pulls in `@base-ui/react` + OKLCH color tokens, which broke against Tailwind v3.4 that `create-next-app@14` ships. M1 ended with no shadcn primitives installed and `apps/web` on Tailwind v3. Decision deferred to **M4** (`/workbench`) when Form/Dialog/Tabs/Tooltip primitives become load-bearing — at that point we either upgrade Tailwind v3 → v4 + install latest shadcn, pin shadcn to a v3-compatible release, or hand-roll. M3 (`/dashboard` ingest-status page) is hand-rolled with Tailwind utilities only.
+
 ---
 
 ## 3. Environment variables
@@ -829,12 +831,34 @@ All ingest jobs live in `apps/worker/ingest/`. Each is a Modal scheduled functio
 |---|---|---|---|
 | `ingest_jepx_prices` | japanesepower.org CSV (v1) → direct JEPX scrape (v2) | Daily 06:00 | `jepx_spot_prices` |
 | `ingest_demand` | japanesepower.org → OCCTO direct (v2) | Daily 06:00 | `demand_actuals` |
-| `ingest_generation_mix` | japanesepower.org HH Data | Daily 06:05 | `generation_mix_actuals` |
+| `ingest_generation_mix` | Per-utility area-supply CSVs (TSO publications, see §7.1.1) | Daily 06:05 | `generation_mix_actuals` |
 | `ingest_weather` | Open-Meteo API | Daily 06:10 | `weather_obs` |
 | `ingest_fuel_prices` | CME delayed feeds | Daily 06:15 | `fuel_prices` |
 | `ingest_fx` | frankfurter (ECB) | Daily 06:20 | `fx_rates` |
 | `ingest_holidays` | `holidays-jp` Python package | Annual | `jp_holidays` |
 | `ingest_jepx_intraday` | japanesepower.org | Daily 14:00 | `jepx_spot_prices` (auction_type='intraday') |
+
+#### 7.1.1 Per-utility area-supply CSVs (`ingest_generation_mix`)
+
+> **Updated 2026-05-04.** Originally the spec called for "japanesepower.org HH Data" — recon during M3 found that japanesepower.org publishes spot/intraday/demand/weather only, no fuel-mix CSV. Replaced with the official per-utility "エリア需給実績" (area supply-demand record) publications, which are the same datasets OCCTO consumes for cross-area aggregation. URL patterns are stable per-fiscal-year (`area-YYYY.csv` style) and the file shape is consistent: 3-row header (unit + multi-row column header) followed by hourly rows in `万kWh` (1 万kWh per hour = 10 MW continuous).
+
+| Area | Operator | URL pattern | Encoding | M3 status |
+|---|---|---|---|---|
+| TK | TEPCO PG | `https://www.tepco.co.jp/forecast/html/images/area-{fy}.csv` | utf-8-sig | **Implemented** |
+| HK | Hokkaido EPCO | `http://denkiyoho.hepco.co.jp/area/data/jukyu_{fy}_hokkaido.csv` | cp932 | v2 |
+| TH | Tohoku EPCO | `https://setsuden.nw.tohoku-epco.co.jp/common/demand/juyo_{fy}_tohoku.csv` | cp932 | v2 |
+| CB | Chubu EPCO | `https://powergrid.chuden.co.jp/denkiyoho/csv/area_jukyu_{fy}.csv` | cp932 | v2 |
+| HR | Hokuriku EPCO | `https://www.rikuden.co.jp/nw_jyukyudata/attach/area_jukyu_{fy}.csv` | cp932 | v2 |
+| KS | Kansai EPCO | `https://www.kansai-td.co.jp/yamasou/area_jukyu_{fy}.csv` | cp932 | v2 |
+| CG | Chugoku EPCO | `https://www.energia.co.jp/nw/jukyuu/sys/area_jukyu_{fy}.csv` | cp932 | v2 |
+| SK | Shikoku EPCO | `https://www.yonden.co.jp/nw/area_jukyu/csv/jukyu_{fy}.csv` | cp932 | v2 |
+| KY | Kyushu EPCO | `https://www.kyuden.co.jp/td_area_jukyu/csv/jukyu_{fy}.csv` | cp932 | v2 |
+
+Fiscal year `fy` is the Japanese FY (April–March), e.g. fiscal 2023 covers 2023-04-01 → 2024-03-31.
+
+The non-TEPCO URL patterns are documented from public landing pages but not yet exercised — confirm exact paths before flipping `_AREA_SOURCES["..."].implemented = True` in `apps/worker/ingest/generation_mix.py`. The parser is generic; column-header idiosyncrasies between utilities (e.g. column name for "Tokyo area demand" varies) may require per-source adjustments.
+
+**Fuel-bucket consolidation.** The CSV groups all fossil thermal (LNG, coal, oil, biomass-mix) into a single `火力` column. We map this to `fuel_types.code='lng_ccgt'` as the best single-bucket proxy. A v3 ingest can split via separate utility data when METI ENECHO publishes per-fuel breakouts; the schema already supports it because `generation_mix_actuals.fuel_type_id` is a free-form FK.
 
 ### 7.2 Required behaviour for every ingest job
 

@@ -37,9 +37,18 @@ seed/      M2 — reference data + data dictionary loaders
 - `seed/data_dictionary.yaml` must stay in lockstep with the schema. **Every column added to a migration requires a matching dictionary entry in the same change.** Re-run `python -m seed.load_data_dictionary` after editing.
 - `seed/models.py` defines Pydantic mirrors only for tables this directory writes (areas, fuel_types, unit_types, jp_holidays, data_dictionary). Models for ingest/forecast/valuation tables live alongside their producers (e.g. `ingest/models.py`, etc.) at the milestone they're built.
 
+## Ingest discipline (post-M3)
+
+- **Use `common.db.connect()` everywhere.** Direct `psycopg.connect()` will eventually trip on the Supabase pooler — `prepare_threshold=None` is set in one place only.
+- **Wrap the work in `compute_run("ingest_<source>")`** from `common.audit`. The dashboard reads `compute_runs` to surface ingest health; missing rows = blind operator.
+- **Acquire `advisory_lock(cur, "ingest_<source>")`** inside the same transaction as the UPSERT. Concurrent runs of the same source corrupt audit accounting.
+- **Decorate upstream HTTP calls with `@retry_transient`** (from `common.retry`). Don't decorate the entire `ingest()` — re-running writes after a partial success creates phantom audit rows.
+- **Per-source dialects:** `generation_mix.py` shows the pattern for dual URL formats (TEPCO has annual + monthly publications with different schemas). The other 8 utilities have similar two-tier publications; rolling them out is mechanical — set `_AREA_SOURCES["XX"].implemented = True`, confirm the URL/encoding/header conventions, and the same parser shells should work.
+- **Stale-source detection:** dynamic, not hardcoded. `demand.py::_upstream_latest()` is the template — read max(date) from the upstream and let `compute_runs.notes` say what's actually fresh. Hardcoded cutoffs go stale faster than the source.
+
 ## Milestone status
 
-M1 (current): Modal app deploys, `healthcheck()` returns "ok". No ingest, no models, no endpoints.
+M3: Six daily Modal cron ingest jobs live (jepx_prices, demand, generation_mix, weather, fx, holidays). Backfill 2020 → 2026 done for the live sources. TEPCO area=TK only for generation_mix; other 8 utility URLs documented in `ingest/generation_mix.py::_AREA_SOURCES` for v2 follow-up.
 
 ## Don't
 
