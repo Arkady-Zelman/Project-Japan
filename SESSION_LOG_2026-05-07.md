@@ -193,3 +193,58 @@ Effort: 1-2 weeks per spec. M6 is the second-highest-risk milestone.
 - **`generator_availability` ingest** — per-unit time-varying availability would tighten the stack model further. Schema exists; ingest needs to be built.
 - **Janczura-Weron strict spec** — current MRS uses constant trend + switching variance. Adding hard-constrained AR=0 in spike/drop only would require a custom statsmodels subclass; deferred unless gate fails.
 - **shadcn `<Select>` Base-UI quirk** — the M4-era refactor to native `<select>` is still in place; if shadcn updates the Select component to use Radix again, we can swap back.
+
+---
+
+## M5.5 — POT addition (2026-05-08)
+
+After the operator asked "fix the markov chain model via new class" + "research potential techniques", the original MRS-only approach hit its structural ceiling: TK 99.2% but TH stuck at 20% because of a textbook Gaussian-mixture-EM pathology on skewed residuals (small one-sided tail outvoted by the opposite-side mass; EM allocates no regime to it; smoother gives p_spike≈0 on real spike events).
+
+### What shipped
+- `apps/worker/regime/jw_mrs.py` — new `JanczuraWeronMRS` class with **posterior-weighted regime labeling** (replaces variance-only rule). For each regime, mean P(state=k | high-price slot) over historical 95th-percentile-and-above prices; spike = argmax; remaining two split base (lower variance) / drop (higher).
+- `apps/worker/regime/pot.py` — new `PeaksOverThreshold` class. Two-sided GPD on residual tails, empirical-CDF-rank tail probability, `direction='both'` so spike probability lifts on extreme residuals in either direction.
+- `mrs_calibrate.py` and `infer_state.py` updated to run MRS + POT side-by-side. Combined via `p_spike = max(p_mrs, p_pot)` with renormalisation of (p_base, p_drop) so the triplet still sums to 1.
+- `validate.py` extended to all 9 areas (gate still scoped to TK + TH per spec).
+- BUILD_SPEC §7.4 + §12 M5 amended.
+
+### Result
+
+Pre-POT (M5 shipped):
+
+```
+TK 99.2% PASS   TH 20% FAIL   gate FAIL
+```
+
+Post-POT (M5.5):
+
+```
+TK 100% PASS   TH 100% PASS   gate PASS
+CB 100% PASS   KS 100% PASS
+HK 60.9%       HR 66.7%       (informational; substantially improved but not gate-passing)
+CG/SK/KY       sparse (1-6 slots, can't gate cleanly)
+```
+
+### Why POT works where MRS-only didn't
+MRS allocates regimes where the *mass* lives. TH has hundreds of negative-residual oversupply slots and only ~40 positive-residual spike slots in the calibration window; EM gives all three regimes to the negative side and ignores the right tail. POT skips the regime question and directly models the empirical tails. Both-tails mode catches spike events regardless of whether the stack model overshoots (negative residual) or undershoots (positive residual) — TK falls into the first case, TH into the second.
+
+### Research provenance
+A parallel research agent confirmed the diagnosis: "symmetric Gaussian-mixture EM has no incentive to allocate a regime to a small right tail when the left tail has more mass" is the canonical MRS pathology on skewed power-price residuals (Chan et al. 2014; Coles 2001). The recommended fix in the literature is exactly what we implemented — POT/GPD as a tail correction layer on top of an existing body model (MRS here). HK and HR's residual structure (median residual on top-1% prices is far from zero in both directions, with neither tail clearly dominating) suggests they'd benefit from per-slot conditioning on weather + demand features — which is what M6 VLSTM is built to do.
+
+### Iteration trail (POT direction tuning, ~30 minutes)
+1. `_choose_tail_direction` v1: median residual on `prices > ¥30/kWh` slots, full window. TH picked left tail (median = -0.76) because most >¥30 slots had negative residuals (stack model overshoots at high price most of the time). Wrong call.
+2. v2: tightened to top 1% of prices. Same outcome — top 1% is a bimodal mix.
+3. v3 (shipped): `direction='both'` always. Both tails contribute, oversupply slots filtered by realised-price gate. Median/mean diagnostic still logged for transparency.
+
+### Files written / modified this M5.5 phase
+
+**New:**
+- `apps/worker/regime/jw_mrs.py`
+- `apps/worker/regime/pot.py`
+
+**Modified:**
+- `apps/worker/regime/mrs_calibrate.py` — _fit_mrs delegates to JanczuraWeronMRS; calibrate_area runs POT + combines + renormalises
+- `apps/worker/regime/infer_state.py` — same POT integration on the daily refresh path
+- `apps/worker/regime/validate.py` — extended to 9 areas, sparse-slot detection
+- `apps/worker/regime/CLAUDE.md` — module table updated, posterior-weighted labeling + POT documentation
+- `BUILD_SPEC.md` §7.4 (full rewrite of regime calibration section), §12 M5 (gate-pass result)
+- `SESSION_LOG_2026-05-07.md` (this section)

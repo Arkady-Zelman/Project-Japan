@@ -23,9 +23,11 @@ Consumers:
 | File | Purpose |
 | --- | --- |
 | `models.py` | Pydantic for ModelRow + RegimeStateRow. |
-| `mrs_calibrate.py` | Per-area MRS fit via `statsmodels.tsa.regime_switching.markov_regression`. Persists one `models` row per area. |
-| `infer_state.py` | Hamilton's filter forward + Kim's smoother backward via `result.smoothed_marginal_probabilities`. Persists `regime_states`. |
-| `validate.py` | April 2026 spike-window gate. P(spike) ≥ 0.7 on ≥80% of TK and TH spike slots (realised > ¥30/kWh) — see BUILD_SPEC §12 M5 (amended 2026-05-07). |
+| `jw_mrs.py` | `JanczuraWeronMRS` class: 3-regime MRS with posterior-weighted regime labeling + biased-init candidate ladder + AR(1) fallback. |
+| `pot.py` | `PeaksOverThreshold` class: two-sided GPD on residual tails + empirical-CDF-rank tail probability. Lifts MRS posterior on sparse-tail spike events. |
+| `mrs_calibrate.py` | Per-area calibration. Runs MRS + POT, combines via `p_spike = max(p_mrs, p_pot)`, renormalises, persists `models` + `regime_states` atomically. |
+| `infer_state.py` | Hamilton's filter forward + Kim's smoother backward, plus POT pass. Daily refresh of `regime_states`. |
+| `validate.py` | April 2026 spike-window gate. P(spike) ≥ 0.7 on ≥80% of TK and TH spike slots (realised > ¥30/kWh) — see BUILD_SPEC §12 M5 (amended 2026-05-07). All 9 areas reported; only TK + TH gate-fail. |
 
 ## Discipline
 
@@ -37,10 +39,24 @@ Consumers:
 - **Pre-fit transform: `log(price_kwh / modelled_stack_kwh)`.** The M4 stack
   output is the deterministic baseline, so the residual is pure regime/sentiment.
   Slots where either side is null/non-positive are dropped from the fit.
-- **Identify regimes by sorted means.** statsmodels returns regimes in an
-  arbitrary order. Sort `result.params[trend_indices]` ascending — the lowest
-  is `drop`, middle is `base`, highest is `spike`. Persist the index→label
-  mapping in `models.hyperparams.regime_mapping` so `infer_state.py` can decode.
+- **Identify regimes via posterior-weighted labeling**, not by sorted means or
+  variances. For each regime, compute mean P(state=k | high-price slot) over
+  the historical 95th-percentile-and-above price slots in the calibration
+  window; `spike` = argmax. Among the remaining two: lowest variance = `base`,
+  other = `drop`. Variance-only labeling fails for areas where the spike
+  events have positive residuals (e.g. TH); mean-only fails for areas where
+  spike events have negative residuals (e.g. TK). Posterior-weighted handles
+  both cases. Mapping persisted in `models.hyperparams.regime_mapping`.
+
+- **POT (peaks-over-threshold) is the structural fix for skewed residuals.**
+  Symmetric 3-regime Gaussian-mixture MRS allocates regimes to where the
+  *mass* lives; sparse one-sided tails get no regime of their own, so MRS
+  posterior P(spike) ≈ 0 on real spike events for areas like TH. POT models
+  the residual tails directly (GPD on excesses) and combines with MRS via
+  `p_spike = max(p_mrs, p_pot)`. We use `direction='both'` so the spike
+  probability lifts on residuals far from the median in either direction —
+  oversupply slots (extreme negative residual at low price) are filtered out
+  by the gate's realised-price threshold anyway.
 
 ## Don't
 

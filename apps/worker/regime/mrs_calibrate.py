@@ -34,15 +34,14 @@ from typing import cast
 import numpy as np
 import pandas as pd
 import psycopg
-from statsmodels.tsa.regime_switching.markov_regression import (  # type: ignore[import-untyped]
-    MarkovRegression,
-)
 
 from common.audit import compute_run
 from common.db import connect
 from common.lock import advisory_lock
 
+from .jw_mrs import JanczuraWeronMRS
 from .models import CalibratedModel
+from .pot import PeaksOverThreshold
 
 logger = logging.getLogger("regime.mrs_calibrate")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -60,13 +59,18 @@ class _AreaResiduals:
     area_id: str
     timestamps: pd.DatetimeIndex
     residuals: np.ndarray   # log(price_kwh / stack_kwh), 1-D
+    prices: np.ndarray      # raw price_jpy_kwh, 1-D, aligned to residuals
 
 
 def _load_residuals(
     cur: psycopg.Cursor, area_id: str, area_code: str,
     start: date, end: date,
 ) -> _AreaResiduals:
-    """Pull jepx prices ⨝ stack clearing prices, compute log residual."""
+    """Pull jepx prices ⨝ stack clearing prices, compute log residual.
+
+    Also returns the raw price series aligned to the residuals — needed by
+    `JanczuraWeronMRS.fit()` for posterior-weighted regime labeling.
+    """
     cur.execute(
         """
         select j.slot_start,
@@ -92,6 +96,7 @@ def _load_residuals(
     if not rows:
         return _AreaResiduals(area_code, area_id,
                               pd.DatetimeIndex([], tz="UTC"),
+                              np.array([], dtype=float),
                               np.array([], dtype=float))
 
     df = pd.DataFrame(rows, columns=["slot_start", "price_kwh", "stack_jpy_mwh"])
@@ -102,91 +107,36 @@ def _load_residuals(
     if df.empty:
         return _AreaResiduals(area_code, area_id,
                               pd.DatetimeIndex([], tz="UTC"),
+                              np.array([], dtype=float),
                               np.array([], dtype=float))
 
     residuals = np.log(df["price_kwh"].to_numpy()) - np.log(df["stack_kwh"].to_numpy())
     residuals = np.clip(residuals, -_RESIDUAL_CLIP, _RESIDUAL_CLIP)
+    prices = df["price_kwh"].to_numpy()
     ts = pd.DatetimeIndex(df["slot_start"]).tz_convert("UTC")
-    return _AreaResiduals(area_code, area_id, ts, residuals)
+    return _AreaResiduals(area_code, area_id, ts, residuals, prices)
 
 
-def _fit_mrs(residuals: np.ndarray) -> tuple[dict, np.ndarray]:
-    """Fit 3-regime MarkovRegression. Returns (params_dict, smoothed_T_by_3).
+def _fit_mrs(residuals: np.ndarray, prices: np.ndarray) -> tuple[dict, np.ndarray]:
+    """Fit 3-regime Janczura-Weron MRS via the JanczuraWeronMRS wrapper.
 
-    `smoothed` is the T×3 matrix of posterior regime probabilities aligned
-    to the input residual order. Caller writes both the params (to `models`)
-    and the smoothed probs (to `regime_states`) in one pass — guarantees
-    label consistency between the two tables.
+    Returns (params_dict, smoothed_T_by_3).
+
+    The wrapper's primary fit is `MarkovAutoregression(order=1, switching_ar=True,
+    switching_variance=True)`, which adds AR(1) per regime — the base regime
+    naturally falls out as the most mean-reverting one. Falls back to the prior
+    `MarkovRegression(trend='c', switching_variance=True)` if AR(1) doesn't
+    converge cleanly. Regime labeling uses **posterior-weighted high-price
+    coverage** (the regime with highest posterior mass during historical
+    price-spike events = "spike"), which removes the directional-residual
+    ambiguity that broke the previous variance-only labeling on TH.
+
+    Caller writes both the params (to `models`) and the smoothed probs (to
+    `regime_states`) in one transaction — guarantees label/posterior
+    consistency between the two tables.
     """
-    if len(residuals) < 200:
-        raise ValueError(f"insufficient residuals for MRS fit: n={len(residuals)}")
-
-    mod = MarkovRegression(
-        residuals,
-        k_regimes=3,
-        trend="c",
-        switching_variance=True,
-    )
-    # `em_iter` does an EM warm-up so the optimizer has a sane starting point.
-    # search_reps=20 gives the optimizer 20 different random starts; helps find
-    # the heavy-tailed "spike" regime when the residual distribution has thin
-    # outliers (TH-style fits otherwise converge to a tight 3-mode fit that
-    # misses the extreme-tail mode).
-    result = mod.fit(em_iter=30, search_reps=20, disp=False)
-
-    # statsmodels packs params as a 1-D ndarray. Layout for k_regimes=3,
-    # trend='c', switching_variance=True is:
-    #   params[0..5]   transition probs (6 free params for 3-regime)
-    #   params[6..8]   const[0..2] = regime means
-    #   params[9..11]  sigma2[0..2] = regime variances
-    param_names = list(mod.param_names)
-    mean_idxs = [param_names.index(f"const[{k}]") for k in range(3)]
-    var_idxs = [param_names.index(f"sigma2[{k}]") for k in range(3)]
-    means = np.array([float(result.params[i]) for i in mean_idxs])
-    variances = np.array([float(result.params[i]) for i in var_idxs])
-    # regime_transition shape (k, k, 1). P[i, j] = P(next=i | prev=j) per
-    # statsmodels' convention. We persist as-is + document.
-    P = np.asarray(result.regime_transition).squeeze().tolist()
-
-    smoothed = np.asarray(result.smoothed_marginal_probabilities)
-    if smoothed.shape[0] == 3 and smoothed.shape[1] == len(residuals):
-        smoothed = smoothed.T
-
-    # Regime labeling: in a clean Janczura-Weron 3-regime fit, base is
-    # the low-variance "normal trading" regime while spike and drop are
-    # heavy-tailed regimes capturing upward and downward jumps. With
-    # log(price/stack) residuals and a stack model that's biased high,
-    # statsmodels' EM tends to converge to a fit where ONE regime captures
-    # both tails (high variance, mean centered near the central tendency)
-    # and the other two regimes capture two narrower bands of "normal".
-    #
-    # Pragmatic labels:
-    #   base  = lowest variance regime (mean-reverting trading)
-    #   spike = highest variance regime (the catch-all for outliers; in
-    #           our fits it absorbs both directions of jump and is the
-    #           regime smoothed_probs assigns to extreme price events
-    #           like the April 2026 spike slots)
-    #   drop  = remaining regime
-    var_order = np.argsort(variances)  # ascending
-    idx_base = int(var_order[0])
-    idx_drop = int(var_order[1])
-    idx_spike = int(var_order[2])
-    regime_mapping = {
-        str(idx_base): "base",
-        str(idx_drop): "drop",
-        str(idx_spike): "spike",
-    }
-    params_dict = {
-        "means": means.tolist(),
-        "variances": variances.tolist(),
-        "transition_matrix": P,
-        "regime_mapping": regime_mapping,
-        "log_likelihood": float(result.llf),
-        "aic": float(result.aic),
-        "bic": float(result.bic),
-        "n_obs": int(len(residuals)),
-    }
-    return params_dict, smoothed
+    model = JanczuraWeronMRS(residuals=residuals, prices=prices)
+    return model.fit()
 
 
 def _persist(
@@ -267,7 +217,20 @@ def calibrate_area(
                     })
                     return None
 
-                params, smoothed = _fit_mrs(resids.residuals)
+                params, smoothed = _fit_mrs(resids.residuals, resids.prices)
+
+                # Run POT in parallel to MRS — same residual+price series.
+                # POT's per-slot tail probability is combined with the MRS
+                # spike posterior via max() to lift cases where MRS missed
+                # the asymmetric tail (the TH-on-skewed-residuals failure
+                # documented in SESSION_LOG_2026-05-07.md).
+                pot = PeaksOverThreshold(
+                    residuals=resids.residuals, prices=resids.prices
+                )
+                pot.fit()
+                p_tail_arr = pot.tail_probabilities(resids.residuals)
+                params["pot"] = pot.params
+
                 cm = CalibratedModel(
                     area_code=area_code,
                     name=f"mrs_{area_code}",
@@ -292,10 +255,33 @@ def calibrate_area(
                 idx_drop = next(i for i, lbl in inv.items() if lbl == "drop")
 
                 rows: list[tuple] = []
-                for ts, probs in zip(resids.timestamps, smoothed, strict=False):
-                    p_base = min(max(round(float(probs[idx_base]), 5), 0.0), 1.0)
-                    p_spike = min(max(round(float(probs[idx_spike]), 5), 0.0), 1.0)
-                    p_drop = min(max(round(float(probs[idx_drop]), 5), 0.0), 1.0)
+                pot_lifted_count = 0
+                for ts, probs, p_tail in zip(
+                    resids.timestamps, smoothed, p_tail_arr, strict=False
+                ):
+                    p_base_raw = float(probs[idx_base])
+                    p_spike_raw = float(probs[idx_spike])
+                    p_drop_raw = float(probs[idx_drop])
+                    # Combine MRS posterior with POT tail probability. POT
+                    # only "lifts" — it can raise p_spike but never lower it.
+                    p_spike_combined = max(p_spike_raw, float(p_tail))
+                    if p_spike_combined > p_spike_raw + 1e-9:
+                        pot_lifted_count += 1
+                    # Renormalise the remaining mass on (p_base, p_drop) so
+                    # the triplet still sums to 1. Edge case: if p_spike_raw
+                    # ≈ 1 already, p_remaining ≈ 0, leave the others alone.
+                    remaining = max(0.0, 1.0 - p_spike_combined)
+                    other_total = p_base_raw + p_drop_raw
+                    if other_total > 1e-9:
+                        scale = remaining / other_total
+                        p_base = p_base_raw * scale
+                        p_drop = p_drop_raw * scale
+                    else:
+                        p_base = remaining * 0.5
+                        p_drop = remaining * 0.5
+                    p_base = min(max(round(p_base, 5), 0.0), 1.0)
+                    p_spike = min(max(round(p_spike_combined, 5), 0.0), 1.0)
+                    p_drop = min(max(round(p_drop, 5), 0.0), 1.0)
                     triplet = {"base": p_base, "spike": p_spike, "drop": p_drop}
                     most_likely = max(triplet, key=lambda k: triplet[k])
                     rows.append((
@@ -304,6 +290,7 @@ def calibrate_area(
                         p_base, p_spike, p_drop,
                         most_likely, version,
                     ))
+                params["pot_lifted_slots"] = pot_lifted_count
 
                 inserted = 0
                 for i in range(0, len(rows), 1000):
@@ -326,10 +313,17 @@ def calibrate_area(
             conn.commit()
 
         logger.info(
-            "%s: fit MRS n=%d means=%s variances=%s mapping=%s rows_written=%d model_id=%s",
-            area_code, params["n_obs"],
+            "%s: fit=%s label=%s coverage=%.2f n=%d means=%s variances=%s "
+            "ar=%s mapping=%s rows_written=%d model_id=%s",
+            area_code,
+            params["fit_method"], params["labeling_method"],
+            params["high_price_coverage"], params["n_obs"],
             [round(m, 3) for m in params["means"]],
             [round(v, 3) for v in params["variances"]],
+            (
+                [round(a, 3) for a in params["ar_coefs"]]
+                if params.get("ar_coefs") is not None else None
+            ),
             params["regime_mapping"],
             inserted,
             model_id,

@@ -25,15 +25,14 @@ from typing import cast
 
 import numpy as np
 import psycopg
-from statsmodels.tsa.regime_switching.markov_regression import (  # type: ignore[import-untyped]
-    MarkovRegression,
-)
 
 from common.audit import compute_run
 from common.db import connect
 from common.lock import advisory_lock
 
+from .jw_mrs import JanczuraWeronMRS
 from .mrs_calibrate import _load_residuals
+from .pot import PeaksOverThreshold
 
 logger = logging.getLogger("regime.infer_state")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -56,16 +55,24 @@ def _load_active_model(cur: psycopg.Cursor, area_code: str) -> tuple[str, str, d
     return row[0], row[1], json.loads(row[2])
 
 
-def _smoothed_probs(residuals: np.ndarray, hp: dict) -> np.ndarray:
-    """Re-fit MarkovRegression on residuals and return T×3 smoothed probabilities."""
-    mod = MarkovRegression(
-        residuals, k_regimes=3, trend="c", switching_variance=True
-    )
-    result = mod.fit(em_iter=10, search_reps=3, disp=False)
-    smoothed = np.asarray(result.smoothed_marginal_probabilities)
-    if smoothed.shape[0] == 3 and smoothed.shape[1] == len(residuals):
-        smoothed = smoothed.T  # statsmodels can return either shape; normalise.
-    return smoothed
+def _smoothed_probs(
+    residuals: np.ndarray, prices: np.ndarray, hp: dict
+) -> tuple[np.ndarray, dict[str, str]]:
+    """Re-fit JanczuraWeronMRS on residuals + prices.
+
+    Returns (T×3 smoothed posteriors, regime_mapping). The labeling has to be
+    re-derived because the EM converges to an arbitrary regime ordering each
+    fit; the persisted hyperparams from `hp` are NOT directly applied.
+
+    For the daily refresh case (this function), we still trust posterior-
+    weighted labeling on the same window — over enough slots it produces the
+    same labels as calibration. If you need exact label parity with the
+    persisted model, run `mrs_calibrate.calibrate_area()` instead, which
+    writes models + regime_states atomically.
+    """
+    model = JanczuraWeronMRS(residuals=residuals, prices=prices)
+    params, smoothed = model.fit()
+    return smoothed, params["regime_mapping"]
 
 
 def infer_area(
@@ -97,34 +104,43 @@ def infer_area(
                     run.set_output({"skipped": "insufficient_residuals", "n": int(len(resids.residuals))})
                     return 0
 
-                smoothed = _smoothed_probs(resids.residuals, hp)
-                # Match the variance-based labeling used by mrs_calibrate.
-                # Compute the per-regime conditional variance from the smoothed
-                # probabilities and the same residual series. lowest variance =
-                # base, highest = spike, remaining = drop.
-                fit_means = np.array([
-                    smoothed[:, k].dot(resids.residuals) / max(smoothed[:, k].sum(), 1e-9)
-                    for k in range(3)
-                ])
-                fit_vars = np.array([
-                    smoothed[:, k].dot((resids.residuals - fit_means[k]) ** 2)
-                    / max(smoothed[:, k].sum(), 1e-9)
-                    for k in range(3)
-                ])
-                var_order = np.argsort(fit_vars)  # ascending
-                idx_base = int(var_order[0])
-                idx_drop = int(var_order[1])
-                idx_spike = int(var_order[2])
+                smoothed, mapping = _smoothed_probs(
+                    resids.residuals, resids.prices, hp
+                )
+                inv = {int(k): v for k, v in mapping.items()}
+                idx_base = next(i for i, lbl in inv.items() if lbl == "base")
+                idx_spike = next(i for i, lbl in inv.items() if lbl == "spike")
+                idx_drop = next(i for i, lbl in inv.items() if lbl == "drop")
+
+                # POT tail probability — combined with MRS posterior via max
+                # to lift sparse-tail spike events the MRS misses (per the
+                # M5.5 amendment in BUILD_SPEC §7.4).
+                pot = PeaksOverThreshold(
+                    residuals=resids.residuals, prices=resids.prices
+                )
+                pot.fit()
+                p_tail_arr = pot.tail_probabilities(resids.residuals)
 
                 rows: list[tuple] = []
-                for ts, probs in zip(resids.timestamps, smoothed, strict=False):
-                    p_drop = round(float(probs[idx_drop]), 5)
-                    p_base = round(float(probs[idx_base]), 5)
-                    p_spike = round(float(probs[idx_spike]), 5)
-                    # Numeric(6,5) caps at 9.99999 — just clamp to [0,1].
-                    p_drop = min(max(p_drop, 0.0), 1.0)
-                    p_base = min(max(p_base, 0.0), 1.0)
-                    p_spike = min(max(p_spike, 0.0), 1.0)
+                for ts, probs, p_tail in zip(
+                    resids.timestamps, smoothed, p_tail_arr, strict=False
+                ):
+                    p_base_raw = float(probs[idx_base])
+                    p_spike_raw = float(probs[idx_spike])
+                    p_drop_raw = float(probs[idx_drop])
+                    p_spike_combined = max(p_spike_raw, float(p_tail))
+                    remaining = max(0.0, 1.0 - p_spike_combined)
+                    other_total = p_base_raw + p_drop_raw
+                    if other_total > 1e-9:
+                        scale = remaining / other_total
+                        p_base = p_base_raw * scale
+                        p_drop = p_drop_raw * scale
+                    else:
+                        p_base = remaining * 0.5
+                        p_drop = remaining * 0.5
+                    p_base = min(max(round(p_base, 5), 0.0), 1.0)
+                    p_spike = min(max(round(p_spike_combined, 5), 0.0), 1.0)
+                    p_drop = min(max(round(p_drop, 5), 0.0), 1.0)
                     triplet = {"drop": p_drop, "base": p_base, "spike": p_spike}
                     most_likely = max(triplet, key=lambda k: triplet[k])
                     rows.append((

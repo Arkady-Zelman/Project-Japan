@@ -28,7 +28,14 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 _SPIKE_PRICE_THRESHOLD_KWH = 30.0
 _SPIKE_POSTERIOR_THRESHOLD = 0.7
 _PASS_FRACTION = 0.80
-_DEFAULT_AREAS: tuple[str, ...] = ("TK", "TH")
+# All 9 areas evaluated. The spec gate requires TK + TH; the remaining 7 are
+# diagnostic — areas with too few spike slots in April 2026 are flagged
+# separately so a sparse spike count doesn't read as a failure.
+_DEFAULT_AREAS: tuple[str, ...] = (
+    "TK", "TH", "HK", "HR", "CB", "KS", "CG", "SK", "KY",
+)
+_GATE_REQUIRED_AREAS: tuple[str, ...] = ("TK", "TH")
+_MIN_SPIKE_SLOTS_FOR_GATE = 10
 
 
 def evaluate(start: date, end: date, areas: tuple[str, ...] = _DEFAULT_AREAS) -> dict:
@@ -89,6 +96,7 @@ def evaluate(start: date, end: date, areas: tuple[str, ...] = _DEFAULT_AREAS) ->
                         "n_above_posterior_threshold": 0,
                         "fraction_passing": 0.0,
                         "passes_gate": False,
+                        "skipped": "no_spike_slots",
                     }
                     continue
 
@@ -98,15 +106,26 @@ def evaluate(start: date, end: date, areas: tuple[str, ...] = _DEFAULT_AREAS) ->
                     if r[2] is not None and float(r[2]) >= _SPIKE_POSTERIOR_THRESHOLD
                 )
                 fraction = n_above / max(n_with, 1)
+                # Areas with very few spike slots can't meaningfully pass or
+                # fail the gate; a single missed slot in 5 reads as 80% but
+                # is statistical noise. Mark them informational-only.
+                gateable = n_total >= _MIN_SPIKE_SLOTS_FOR_GATE
                 per_area[code] = {
                     "n_spike_slots": n_total,
                     "n_with_regime_state": n_with,
                     "n_above_posterior_threshold": n_above,
                     "fraction_passing": round(fraction, 4),
-                    "passes_gate": fraction >= _PASS_FRACTION,
+                    "passes_gate": gateable and fraction >= _PASS_FRACTION,
+                    "gateable": gateable,
                 }
 
-        gate_pass = all(per_area[c]["passes_gate"] for c in areas)
+        # The spec gate is required only for TK + TH. Other areas are reported
+        # for transparency but don't gate-fail M5.
+        gate_pass = all(
+            per_area[c]["passes_gate"]
+            for c in _GATE_REQUIRED_AREAS
+            if c in per_area
+        )
         out = {
             "per_area": per_area,
             "gate_pass": gate_pass,
@@ -124,18 +143,25 @@ def main(argv: list[str] | None = None) -> int:
     out = evaluate(args.start, args.end)
     print()
     print(
-        f"{'area':<5} {'n_total':>8} {'n_w_state':>10} {'n>=0.7':>8} "
-        f"{'pct':>7} {'gate':>6}"
+        f"{'area':<5} {'gate?':<6} {'n_total':>8} {'n_w_state':>10} {'n>=0.7':>8} "
+        f"{'pct':>7} {'verdict':>10}"
     )
     for code, r in out["per_area"].items():
-        gate = "PASS" if r["passes_gate"] else "FAIL"
+        required = code in _GATE_REQUIRED_AREAS
+        if not r.get("gateable", True):
+            verdict = "SPARSE"
+        elif r["passes_gate"]:
+            verdict = "PASS"
+        else:
+            verdict = "FAIL"
         print(
-            f"{code:<5} {r['n_spike_slots']:>8} {r['n_with_regime_state']:>10} "
+            f"{code:<5} {'GATE' if required else 'INFO':<6} "
+            f"{r['n_spike_slots']:>8} {r['n_with_regime_state']:>10} "
             f"{r['n_above_posterior_threshold']:>8} "
-            f"{r['fraction_passing']*100:>6.1f}% {gate:>6}"
+            f"{r['fraction_passing']*100:>6.1f}% {verdict:>10}"
         )
     print()
-    print(f"Gate: {'PASS' if out['gate_pass'] else 'FAIL'}")
+    print(f"Gate (TK+TH): {'PASS' if out['gate_pass'] else 'FAIL'}")
     return 0
 
 
