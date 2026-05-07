@@ -1,0 +1,145 @@
+# Japanese dispatchable generation fleet — hand-curated public-knowledge seed.
+#
+# Loaded by `python -m stack.load_generators`. UPSERT keyed on
+# (name, area_id, operator).
+#
+# Coverage philosophy:
+#   - Top dispatchable units (≥100 MW) per area: thermal (LNG/coal/oil),
+#     nuclear, pumped-storage. ~60 units total.
+#   - Variable renewables (solar, wind, run-of-river hydro) are NOT here —
+#     the stack engine handles them via `generation_mix_actuals` actuals
+#     or `stack/weather_proxy.py` for VRE capacity reduction.
+#
+# Data caveats:
+#   - Capacity values are nameplate rated capacity, drawn from public
+#     utility / METI / Japan Atomic Industrial Forum (JAIF) reports.
+#     Cross-checked against company press releases where possible.
+#   - Efficiencies are LITERATURE DEFAULTS by (fuel, unit_type) — not
+#     unit-specific test results. Real-fleet HHV efficiencies for similar
+#     vintage and configuration. Acceptable for stack-model purposes;
+#     sensitivity analysis will flag if any unit's efficiency materially
+#     swings the marginal price for a slot.
+#   - Variable O&M and CO2 intensities are IEA / IPCC defaults per fuel
+#     family. Do not treat as bid-book quality.
+#   - Nuclear units list nameplate; the engine reads `generator_availability`
+#     for actual operability. Most Japanese nuclear units are offline as
+#     of 2026-05; only Kansai (Ohi 3-4, Takahama 3-4, Mihama 3), Kyushu
+#     (Sendai 1-2, Genkai 3-4), Shikoku (Ikata 3) routinely operate.
+#
+# Sources for spot-checking:
+#   - METI ENECHO 電力調査統計 (Power Survey Statistics): https://www.enecho.meti.go.jp/statistics/electric_power/ep002/
+#   - JAIF reactor status: https://www.jaif.or.jp/en/operation-status-of-nuclear-power-plants-in-japan/
+#   - Each utility's IR / annual report (TEPCO PG, Kansai, Chubu, etc.)
+#
+# Replace this YAML with a more authoritative source (e.g. paid Argus /
+# OCCTO data) when one becomes available — the loader is idempotent.
+
+generators:
+  # ============================================================
+  # TK — TEPCO Power Grid
+  # ============================================================
+  - {name: "Futtsu LNG CCGT", operator: "TEPCO Fuel & Power", area_code: TK, unit_type_code: ccgt, fuel_type_code: lng_ccgt, capacity_mw: 5040, efficiency: 0.55, variable_om_jpy_mwh: 250, co2_intensity_t_mwh: 0.36, commissioned: 1985-12-01}
+  - {name: "Anegasaki LNG", operator: "TEPCO Fuel & Power", area_code: TK, unit_type_code: ccgt, fuel_type_code: lng_ccgt, capacity_mw: 3600, efficiency: 0.51, variable_om_jpy_mwh: 280, co2_intensity_t_mwh: 0.39, commissioned: 1976-04-01}
+  - {name: "Higashi-Ohgishima LNG", operator: "TEPCO Fuel & Power", area_code: TK, unit_type_code: ccgt, fuel_type_code: lng_ccgt, capacity_mw: 2000, efficiency: 0.52, variable_om_jpy_mwh: 270, co2_intensity_t_mwh: 0.38, commissioned: 1984-07-01}
+  - {name: "Kawasaki LNG CCGT", operator: "TEPCO Fuel & Power", area_code: TK, unit_type_code: ccgt, fuel_type_code: lng_ccgt, capacity_mw: 1496, efficiency: 0.58, variable_om_jpy_mwh: 240, co2_intensity_t_mwh: 0.35, commissioned: 2009-02-01}
+  - {name: "Goi LNG", operator: "TEPCO Fuel & Power", area_code: TK, unit_type_code: ccgt, fuel_type_code: lng_ccgt, capacity_mw: 1886, efficiency: 0.50, variable_om_jpy_mwh: 290, co2_intensity_t_mwh: 0.40, commissioned: 1973-04-01}
+  - {name: "Yokohama LNG", operator: "TEPCO Fuel & Power", area_code: TK, unit_type_code: ccgt, fuel_type_code: lng_ccgt, capacity_mw: 3500, efficiency: 0.51, variable_om_jpy_mwh: 280, co2_intensity_t_mwh: 0.39, commissioned: 1986-12-01}
+  - {name: "Hitachinaka coal", operator: "J-Power", area_code: TK, unit_type_code: steam, fuel_type_code: coal, capacity_mw: 2000, efficiency: 0.42, variable_om_jpy_mwh: 380, co2_intensity_t_mwh: 0.85, commissioned: 2003-12-01}
+  - {name: "Hirono coal", operator: "TEPCO Fuel & Power", area_code: TK, unit_type_code: steam, fuel_type_code: coal, capacity_mw: 3800, efficiency: 0.41, variable_om_jpy_mwh: 400, co2_intensity_t_mwh: 0.86, commissioned: 1980-01-01}
+  - {name: "Kashiwazaki-Kariwa Nuclear", operator: "TEPCO", area_code: TK, unit_type_code: steam, fuel_type_code: nuclear, capacity_mw: 8212, efficiency: 0.33, variable_om_jpy_mwh: 1000, co2_intensity_t_mwh: 0.0, availability_factor: 0.14, commissioned: 1985-09-01, notes: "Unit 6 (1356 MW) restarted Feb 2026, commercial operation Mar 2026. Unit 7 restart delayed to 2029-2030, fuel being removed. Units 1-5 (5500 MW) still offline. Effective availability ~0.14 = 1356×0.85 / 8212."}
+  - {name: "Kannagawa pumped storage", operator: "TEPCO Fuel & Power", area_code: TK, unit_type_code: pumped_storage, fuel_type_code: pumped_storage, capacity_mw: 2820, efficiency: 0.75, variable_om_jpy_mwh: 100, co2_intensity_t_mwh: 0.0, commissioned: 2005-12-01}
+  - {name: "Hydro fleet (TK aggregate)", operator: "TEPCO RP / multiple", area_code: TK, unit_type_code: hydro_dam, fuel_type_code: hydro, capacity_mw: 9700, variable_om_jpy_mwh: 100, co2_intensity_t_mwh: 0.0, notes: "Aggregate placeholder for ~9.7 GW conventional hydro (run-of-river + reservoir) in TEPCO area. Replace with per-station seed when needed."}
+
+  # ============================================================
+  # KS — Kansai Electric / Kansai-TD
+  # ============================================================
+  - {name: "Himeji LNG #1", operator: "Kansai Electric", area_code: KS, unit_type_code: ccgt, fuel_type_code: lng_ccgt, capacity_mw: 1442, efficiency: 0.50, variable_om_jpy_mwh: 280, co2_intensity_t_mwh: 0.40, commissioned: 1968-04-01}
+  - {name: "Himeji LNG #2", operator: "Kansai Electric", area_code: KS, unit_type_code: ccgt, fuel_type_code: lng_ccgt, capacity_mw: 2919, efficiency: 0.55, variable_om_jpy_mwh: 250, co2_intensity_t_mwh: 0.36, commissioned: 2013-08-01}
+  - {name: "Sakai LNG", operator: "Kansai Electric", area_code: KS, unit_type_code: ccgt, fuel_type_code: lng_ccgt, capacity_mw: 2000, efficiency: 0.55, variable_om_jpy_mwh: 250, co2_intensity_t_mwh: 0.36, commissioned: 2010-02-01}
+  - {name: "Aioi oil", operator: "Kansai Electric", area_code: KS, unit_type_code: steam, fuel_type_code: oil, capacity_mw: 1125, efficiency: 0.36, variable_om_jpy_mwh: 500, co2_intensity_t_mwh: 0.78, commissioned: 1981-07-01}
+  - {name: "Maizuru coal", operator: "Kansai Electric", area_code: KS, unit_type_code: steam, fuel_type_code: coal, capacity_mw: 1800, efficiency: 0.43, variable_om_jpy_mwh: 380, co2_intensity_t_mwh: 0.83, commissioned: 2004-08-01}
+  - {name: "Ohi Nuclear 3-4", operator: "Kansai Electric", area_code: KS, unit_type_code: steam, fuel_type_code: nuclear, capacity_mw: 2360, efficiency: 0.33, variable_om_jpy_mwh: 1000, co2_intensity_t_mwh: 0.0, availability_factor: 0.85, commissioned: 1991-12-01}
+  - {name: "Takahama Nuclear 3-4", operator: "Kansai Electric", area_code: KS, unit_type_code: steam, fuel_type_code: nuclear, capacity_mw: 1740, efficiency: 0.33, variable_om_jpy_mwh: 1000, co2_intensity_t_mwh: 0.0, availability_factor: 0.85, commissioned: 1985-01-01}
+  - {name: "Mihama Nuclear 3", operator: "Kansai Electric", area_code: KS, unit_type_code: steam, fuel_type_code: nuclear, capacity_mw: 826, efficiency: 0.33, variable_om_jpy_mwh: 1000, co2_intensity_t_mwh: 0.0, availability_factor: 0.85, commissioned: 1976-12-01}
+  - {name: "Okutataragi pumped storage", operator: "Kansai Electric", area_code: KS, unit_type_code: pumped_storage, fuel_type_code: pumped_storage, capacity_mw: 1932, efficiency: 0.75, variable_om_jpy_mwh: 100, co2_intensity_t_mwh: 0.0, commissioned: 1974-06-01}
+  - {name: "Hydro fleet (KS aggregate)", operator: "Kansai / multiple", area_code: KS, unit_type_code: hydro_dam, fuel_type_code: hydro, capacity_mw: 8200, variable_om_jpy_mwh: 100, co2_intensity_t_mwh: 0.0, notes: "Aggregate placeholder for ~8.2 GW conventional hydro in Kansai area."}
+
+  # ============================================================
+  # CB — Chubu Electric Power Grid
+  # ============================================================
+  - {name: "Kawagoe LNG", operator: "JERA", area_code: CB, unit_type_code: ccgt, fuel_type_code: lng_ccgt, capacity_mw: 4802, efficiency: 0.55, variable_om_jpy_mwh: 250, co2_intensity_t_mwh: 0.36, commissioned: 1989-12-01}
+  - {name: "Chita LNG", operator: "JERA", area_code: CB, unit_type_code: ccgt, fuel_type_code: lng_ccgt, capacity_mw: 3958, efficiency: 0.51, variable_om_jpy_mwh: 280, co2_intensity_t_mwh: 0.39, commissioned: 1978-04-01}
+  - {name: "Hekinan coal", operator: "JERA", area_code: CB, unit_type_code: steam, fuel_type_code: coal, capacity_mw: 4100, efficiency: 0.43, variable_om_jpy_mwh: 380, co2_intensity_t_mwh: 0.83, commissioned: 1991-04-01}
+  - {name: "Joetsu LNG", operator: "JERA", area_code: CB, unit_type_code: ccgt, fuel_type_code: lng_ccgt, capacity_mw: 2380, efficiency: 0.57, variable_om_jpy_mwh: 240, co2_intensity_t_mwh: 0.35, commissioned: 2012-07-01}
+  - {name: "Owase oil", operator: "Chubu Electric", area_code: CB, unit_type_code: steam, fuel_type_code: oil, capacity_mw: 875, efficiency: 0.36, variable_om_jpy_mwh: 500, co2_intensity_t_mwh: 0.78, commissioned: 1964-12-01}
+  - {name: "Tahara oil", operator: "Chubu Electric", area_code: CB, unit_type_code: steam, fuel_type_code: oil, capacity_mw: 1400, efficiency: 0.36, variable_om_jpy_mwh: 500, co2_intensity_t_mwh: 0.78, commissioned: 1979-04-01}
+  - {name: "Hamaoka Nuclear", operator: "Chubu Electric", area_code: CB, unit_type_code: steam, fuel_type_code: nuclear, capacity_mw: 3617, efficiency: 0.33, variable_om_jpy_mwh: 1000, co2_intensity_t_mwh: 0.0, availability_factor: 0.0, commissioned: 1987-08-01, notes: "Currently offline pending tsunami-mitigation completion."}
+  - {name: "Nabari pumped storage", operator: "Chubu Electric", area_code: CB, unit_type_code: pumped_storage, fuel_type_code: pumped_storage, capacity_mw: 1280, efficiency: 0.75, variable_om_jpy_mwh: 100, co2_intensity_t_mwh: 0.0, commissioned: 1979-12-01}
+  - {name: "Hydro fleet (CB aggregate)", operator: "Chubu / multiple", area_code: CB, unit_type_code: hydro_dam, fuel_type_code: hydro, capacity_mw: 4900, variable_om_jpy_mwh: 100, co2_intensity_t_mwh: 0.0, notes: "Aggregate placeholder."}
+
+  # ============================================================
+  # TH — Tohoku Electric Power Network
+  # ============================================================
+  - {name: "Higashi-Niigata LNG", operator: "Tohoku Electric", area_code: TH, unit_type_code: ccgt, fuel_type_code: lng_ccgt, capacity_mw: 3450, efficiency: 0.51, variable_om_jpy_mwh: 280, co2_intensity_t_mwh: 0.39, commissioned: 1984-12-01}
+  - {name: "Sendai LNG", operator: "Tohoku Electric", area_code: TH, unit_type_code: ccgt, fuel_type_code: lng_ccgt, capacity_mw: 980, efficiency: 0.50, variable_om_jpy_mwh: 290, co2_intensity_t_mwh: 0.40, commissioned: 1971-09-01}
+  - {name: "Akita oil", operator: "Tohoku Electric", area_code: TH, unit_type_code: steam, fuel_type_code: oil, capacity_mw: 1300, efficiency: 0.36, variable_om_jpy_mwh: 500, co2_intensity_t_mwh: 0.78, commissioned: 1970-07-01}
+  - {name: "Haramachi coal", operator: "Tohoku Electric", area_code: TH, unit_type_code: steam, fuel_type_code: coal, capacity_mw: 2000, efficiency: 0.42, variable_om_jpy_mwh: 380, co2_intensity_t_mwh: 0.85, commissioned: 1997-07-01}
+  - {name: "Noshiro coal", operator: "Tohoku Electric", area_code: TH, unit_type_code: steam, fuel_type_code: coal, capacity_mw: 1800, efficiency: 0.41, variable_om_jpy_mwh: 400, co2_intensity_t_mwh: 0.86, commissioned: 1993-06-01}
+  - {name: "Onagawa Nuclear", operator: "Tohoku Electric", area_code: TH, unit_type_code: steam, fuel_type_code: nuclear, capacity_mw: 2174, efficiency: 0.33, variable_om_jpy_mwh: 1000, co2_intensity_t_mwh: 0.0, availability_factor: 0.40, commissioned: 1984-06-01, notes: "Unit 2 operating since 2024 restart; Units 1 & 3 offline. ~40% fleet availability."}
+  - {name: "Higashidori Nuclear", operator: "Tohoku Electric", area_code: TH, unit_type_code: steam, fuel_type_code: nuclear, capacity_mw: 1100, efficiency: 0.33, variable_om_jpy_mwh: 1000, co2_intensity_t_mwh: 0.0, availability_factor: 0.0, commissioned: 2005-12-01, notes: "Currently offline."}
+  - {name: "Hydro fleet (TH aggregate)", operator: "Tohoku / multiple", area_code: TH, unit_type_code: hydro_dam, fuel_type_code: hydro, capacity_mw: 2400, variable_om_jpy_mwh: 100, co2_intensity_t_mwh: 0.0}
+
+  # ============================================================
+  # HK — Hokkaido Electric Power Network
+  # ============================================================
+  - {name: "Tomato-Atsuma coal", operator: "Hokkaido Electric", area_code: HK, unit_type_code: steam, fuel_type_code: coal, capacity_mw: 1650, efficiency: 0.41, variable_om_jpy_mwh: 400, co2_intensity_t_mwh: 0.86, commissioned: 1980-10-01}
+  - {name: "Date oil", operator: "Hokkaido Electric", area_code: HK, unit_type_code: steam, fuel_type_code: oil, capacity_mw: 700, efficiency: 0.36, variable_om_jpy_mwh: 500, co2_intensity_t_mwh: 0.78, commissioned: 1977-11-01}
+  - {name: "Naie coal", operator: "Hokkaido Electric", area_code: HK, unit_type_code: steam, fuel_type_code: coal, capacity_mw: 350, efficiency: 0.40, variable_om_jpy_mwh: 410, co2_intensity_t_mwh: 0.88, commissioned: 1968-12-01}
+  - {name: "Ishikariwan-Shinko LNG", operator: "Hokkaido Electric", area_code: HK, unit_type_code: ccgt, fuel_type_code: lng_ccgt, capacity_mw: 569, efficiency: 0.57, variable_om_jpy_mwh: 240, co2_intensity_t_mwh: 0.35, commissioned: 2019-02-01}
+  - {name: "Tomari Nuclear", operator: "Hokkaido Electric", area_code: HK, unit_type_code: steam, fuel_type_code: nuclear, capacity_mw: 2070, efficiency: 0.33, variable_om_jpy_mwh: 1000, co2_intensity_t_mwh: 0.0, availability_factor: 0.0, commissioned: 1989-06-01, notes: "All 3 units offline pending NRA review."}
+  - {name: "Kyogoku pumped storage", operator: "Hokkaido Electric", area_code: HK, unit_type_code: pumped_storage, fuel_type_code: pumped_storage, capacity_mw: 600, efficiency: 0.75, variable_om_jpy_mwh: 100, co2_intensity_t_mwh: 0.0, commissioned: 2014-10-01}
+  - {name: "Hydro fleet (HK aggregate)", operator: "Hokkaido / multiple", area_code: HK, unit_type_code: hydro_dam, fuel_type_code: hydro, capacity_mw: 1700, variable_om_jpy_mwh: 100, co2_intensity_t_mwh: 0.0}
+
+  # ============================================================
+  # HR — Hokuriku Electric Power Transmission
+  # ============================================================
+  - {name: "Toyama-Shinminato LNG", operator: "Hokuriku Electric", area_code: HR, unit_type_code: ccgt, fuel_type_code: lng_ccgt, capacity_mw: 1245, efficiency: 0.55, variable_om_jpy_mwh: 250, co2_intensity_t_mwh: 0.36, commissioned: 2018-04-01}
+  - {name: "Nanao-Ohta coal", operator: "Hokuriku Electric", area_code: HR, unit_type_code: steam, fuel_type_code: coal, capacity_mw: 1200, efficiency: 0.42, variable_om_jpy_mwh: 380, co2_intensity_t_mwh: 0.85, commissioned: 1995-03-01}
+  - {name: "Tsuruga oil", operator: "Hokuriku Electric", area_code: HR, unit_type_code: steam, fuel_type_code: oil, capacity_mw: 700, efficiency: 0.36, variable_om_jpy_mwh: 500, co2_intensity_t_mwh: 0.78, commissioned: 1991-09-01}
+  - {name: "Shika Nuclear", operator: "Hokuriku Electric", area_code: HR, unit_type_code: steam, fuel_type_code: nuclear, capacity_mw: 1898, efficiency: 0.33, variable_om_jpy_mwh: 1000, co2_intensity_t_mwh: 0.0, availability_factor: 0.0, commissioned: 1993-07-01, notes: "Currently offline; Noto earthquake damage assessment ongoing."}
+  - {name: "Hydro fleet (HR aggregate)", operator: "Hokuriku / multiple", area_code: HR, unit_type_code: hydro_dam, fuel_type_code: hydro, capacity_mw: 1900, variable_om_jpy_mwh: 100, co2_intensity_t_mwh: 0.0}
+
+  # ============================================================
+  # CG — Chugoku Electric Power Network
+  # ============================================================
+  - {name: "Yanai LNG", operator: "Chugoku Electric", area_code: CG, unit_type_code: ccgt, fuel_type_code: lng_ccgt, capacity_mw: 1400, efficiency: 0.55, variable_om_jpy_mwh: 250, co2_intensity_t_mwh: 0.36, commissioned: 1994-03-01}
+  - {name: "Misumi coal", operator: "Chugoku Electric", area_code: CG, unit_type_code: steam, fuel_type_code: coal, capacity_mw: 1000, efficiency: 0.43, variable_om_jpy_mwh: 380, co2_intensity_t_mwh: 0.83, commissioned: 1998-06-01}
+  - {name: "Shimonoseki coal", operator: "Chugoku Electric", area_code: CG, unit_type_code: steam, fuel_type_code: coal, capacity_mw: 1175, efficiency: 0.40, variable_om_jpy_mwh: 410, co2_intensity_t_mwh: 0.88, commissioned: 1967-04-01}
+  - {name: "Tamashima oil", operator: "Chugoku Electric", area_code: CG, unit_type_code: steam, fuel_type_code: oil, capacity_mw: 300, efficiency: 0.36, variable_om_jpy_mwh: 500, co2_intensity_t_mwh: 0.78, commissioned: 1972-06-01}
+  - {name: "Shimane Nuclear", operator: "Chugoku Electric", area_code: CG, unit_type_code: steam, fuel_type_code: nuclear, capacity_mw: 1820, efficiency: 0.33, variable_om_jpy_mwh: 1000, co2_intensity_t_mwh: 0.0, availability_factor: 0.40, commissioned: 1989-02-01, notes: "Unit 2 operating since late 2024 restart; Unit 1 retired."}
+  - {name: "Minamihara pumped storage", operator: "Chugoku Electric", area_code: CG, unit_type_code: pumped_storage, fuel_type_code: pumped_storage, capacity_mw: 620, efficiency: 0.75, variable_om_jpy_mwh: 100, co2_intensity_t_mwh: 0.0, commissioned: 1976-04-01}
+  - {name: "Hydro fleet (CG aggregate)", operator: "Chugoku / multiple", area_code: CG, unit_type_code: hydro_dam, fuel_type_code: hydro, capacity_mw: 2400, variable_om_jpy_mwh: 100, co2_intensity_t_mwh: 0.0}
+
+  # ============================================================
+  # SK — Shikoku Electric Power Transmission
+  # ============================================================
+  - {name: "Saijo coal", operator: "Shikoku Electric", area_code: SK, unit_type_code: steam, fuel_type_code: coal, capacity_mw: 906, efficiency: 0.42, variable_om_jpy_mwh: 380, co2_intensity_t_mwh: 0.85, commissioned: 1965-11-01}
+  - {name: "Tachibanawan coal", operator: "Shikoku Electric", area_code: SK, unit_type_code: steam, fuel_type_code: coal, capacity_mw: 700, efficiency: 0.43, variable_om_jpy_mwh: 380, co2_intensity_t_mwh: 0.83, commissioned: 2000-12-01}
+  - {name: "Anan oil", operator: "Shikoku Electric", area_code: SK, unit_type_code: steam, fuel_type_code: oil, capacity_mw: 1340, efficiency: 0.36, variable_om_jpy_mwh: 500, co2_intensity_t_mwh: 0.78, commissioned: 1976-04-01}
+  - {name: "Sakaide LNG", operator: "Shikoku Electric", area_code: SK, unit_type_code: ccgt, fuel_type_code: lng_ccgt, capacity_mw: 1300, efficiency: 0.55, variable_om_jpy_mwh: 250, co2_intensity_t_mwh: 0.36, commissioned: 2010-08-01}
+  - {name: "Ikata Nuclear 3", operator: "Shikoku Electric", area_code: SK, unit_type_code: steam, fuel_type_code: nuclear, capacity_mw: 890, efficiency: 0.33, variable_om_jpy_mwh: 1000, co2_intensity_t_mwh: 0.0, availability_factor: 0.85, commissioned: 1994-12-01}
+  - {name: "Hydro fleet (SK aggregate)", operator: "Shikoku / multiple", area_code: SK, unit_type_code: hydro_dam, fuel_type_code: hydro, capacity_mw: 1300, variable_om_jpy_mwh: 100, co2_intensity_t_mwh: 0.0}
+
+  # ============================================================
+  # KY — Kyushu Electric Power Transmission & Distribution
+  # ============================================================
+  - {name: "Shin-Oita LNG", operator: "Kyushu Electric", area_code: KY, unit_type_code: ccgt, fuel_type_code: lng_ccgt, capacity_mw: 2295, efficiency: 0.55, variable_om_jpy_mwh: 250, co2_intensity_t_mwh: 0.36, commissioned: 1991-09-01}
+  - {name: "Shin-Kokura LNG", operator: "Kyushu Electric", area_code: KY, unit_type_code: ccgt, fuel_type_code: lng_ccgt, capacity_mw: 1200, efficiency: 0.50, variable_om_jpy_mwh: 280, co2_intensity_t_mwh: 0.40, commissioned: 1978-04-01}
+  - {name: "Reihoku coal", operator: "Kyushu Electric", area_code: KY, unit_type_code: steam, fuel_type_code: coal, capacity_mw: 1400, efficiency: 0.43, variable_om_jpy_mwh: 380, co2_intensity_t_mwh: 0.83, commissioned: 1994-12-01}
+  - {name: "Karita coal", operator: "Kyushu Electric", area_code: KY, unit_type_code: steam, fuel_type_code: coal, capacity_mw: 750, efficiency: 0.40, variable_om_jpy_mwh: 410, co2_intensity_t_mwh: 0.88, commissioned: 1982-12-01}
+  - {name: "Matsuura coal", operator: "J-Power", area_code: KY, unit_type_code: steam, fuel_type_code: coal, capacity_mw: 2000, efficiency: 0.42, variable_om_jpy_mwh: 380, co2_intensity_t_mwh: 0.85, commissioned: 1990-06-01}
+  - {name: "Buzen oil", operator: "Kyushu Electric", area_code: KY, unit_type_code: steam, fuel_type_code: oil, capacity_mw: 1000, efficiency: 0.36, variable_om_jpy_mwh: 500, co2_intensity_t_mwh: 0.78, commissioned: 1977-09-01}
+  - {name: "Sendai Nuclear 1-2", operator: "Kyushu Electric", area_code: KY, unit_type_code: steam, fuel_type_code: nuclear, capacity_mw: 1780, efficiency: 0.33, variable_om_jpy_mwh: 1000, co2_intensity_t_mwh: 0.0, availability_factor: 0.85, commissioned: 1984-07-01}
+  - {name: "Genkai Nuclear 3-4", operator: "Kyushu Electric", area_code: KY, unit_type_code: steam, fuel_type_code: nuclear, capacity_mw: 2360, efficiency: 0.33, variable_om_jpy_mwh: 1000, co2_intensity_t_mwh: 0.0, availability_factor: 0.85, commissioned: 1994-03-01}
+  - {name: "Ohira pumped storage", operator: "Kyushu Electric", area_code: KY, unit_type_code: pumped_storage, fuel_type_code: pumped_storage, capacity_mw: 500, efficiency: 0.75, variable_om_jpy_mwh: 100, co2_intensity_t_mwh: 0.0, commissioned: 1975-04-01}
+  - {name: "Hydro fleet (KY aggregate)", operator: "Kyushu / multiple", area_code: KY, unit_type_code: hydro_dam, fuel_type_code: hydro, capacity_mw: 1600, variable_om_jpy_mwh: 100, co2_intensity_t_mwh: 0.0}

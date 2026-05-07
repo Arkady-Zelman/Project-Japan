@@ -46,9 +46,21 @@ seed/      M2 — reference data + data dictionary loaders
 - **Per-source dialects:** `generation_mix.py` shows the pattern for dual URL formats (TEPCO has annual + monthly publications with different schemas). The other 8 utilities have similar two-tier publications; rolling them out is mechanical — set `_AREA_SOURCES["XX"].implemented = True`, confirm the URL/encoding/header conventions, and the same parser shells should work.
 - **Stale-source detection:** dynamic, not hardcoded. `demand.py::_upstream_latest()` is the template — read max(date) from the upstream and let `compute_runs.notes` say what's actually fresh. Hardcoded cutoffs go stale faster than the source.
 
+## Stack engine discipline (post-M4)
+
+- **Generator master is hand-curated.** `stack/generators_seed.yaml` covers ~73 dispatchable units (thermal + nuclear + pumped storage + 9 hydro aggregates) across 9 areas. Capacities are nameplate; efficiencies are literature defaults per (fuel, unit_type), not unit-specific. Replace wholesale if/when an Argus/OCCTO bid book becomes available.
+- **`_DEFAULT_AVAILABILITY` in `stack/build_curve.py` is approximate** until `generator_availability` is populated. Nuclear at 0.30 is fleet-wide; a per-area override would tighten the model (TK 0%, KY ~0.5, KS ~0.4 reflect reality better).
+- **Carbon price = ¥0/t** in `stack/srmc.py`. Lift to a constant or table when GX-ETS Phase 2 mandatory pricing activates.
+- **Bulk-fetch pattern is mandatory.** `stack/build_curve.py::_load_area_cache` does one query per (area, input table). Per-slot DB queries inside the build loop will time out the Tokyo pooler — see SESSION_LOG_2026-05-06 for the diagnostic trail.
+- **UPSERT via `cur.executemany` + `ON CONFLICT (area_id, slot_start) DO UPDATE`.** Two round-trips per chunk, regardless of chunk size.
+
 ## Milestone status
 
-M3: Six daily Modal cron ingest jobs live (jepx_prices, demand, generation_mix, weather, fx, holidays). Backfill 2020 → 2026 done for the live sources. TEPCO area=TK only for generation_mix; other 8 utility URLs documented in `ingest/generation_mix.py::_AREA_SOURCES` for v2 follow-up.
+- M3: Six daily Modal cron ingest jobs live (jepx_prices, demand, generation_mix, weather, fx, holidays).
+- M4 Phase 0: 5-utility per-utility CSV scraper rolled out (TK, HK, TH, HR, SK). 4 utilities (CB, KS, CG, KY) deferred per BUILD_SPEC §7.1.1.
+- M4 Phase 1: `ingest_fuel_prices` shipped via FRED CSV mirrors (JKM, Newcastle, Brent). CME-direct deferred.
+- M4 Phase 2-4: Stack engine populated (~73 generators, build_curve.py, backtest harness). RMSE on TK 2023-2024-Q1 = ¥5.3/kWh — gate is ¥3/kWh, FAILS structurally; see SESSION_LOG_2026-05-06 for diagnostic and three options.
+- M4 Phase 5: shadcn/ui installed; `/dashboard` Section C (StackInspector) renders.
 
 ## Don't
 

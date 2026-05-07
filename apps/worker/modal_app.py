@@ -47,8 +47,9 @@ base_image = (
         "tenacity>=8.4",
         "pandas>=2.2",
         "sentry-sdk>=2.0",
+        "numpy>=1.26",
     )
-    .add_local_python_source("common", "ingest", "seed")
+    .add_local_python_source("common", "ingest", "seed", "stack")
 )
 
 # Secret group injected as env vars at runtime. Created by the operator in the
@@ -173,6 +174,55 @@ def ingest_backfill(
 
 
 # ---------------------------------------------------------------------------
+# Stack engine — daily build + on-demand backfill (M4)
+# ---------------------------------------------------------------------------
+
+# 21:30 UTC = 06:30 JST. Fires 30 min after `ingest_daily` so all the
+# input tables are fresh.
+_STACK_DAILY_CRON = modal.Cron("30 21 * * *")
+
+
+@app.function(image=base_image, cpu=2.0, timeout=900, schedule=_STACK_DAILY_CRON, secrets=_secrets)
+def stack_run_daily() -> dict:
+    """Build merit-order curves for yesterday across every area."""
+    from common.sentry import init_sentry
+    from stack.build_curve import build_window
+
+    init_sentry()
+    today = datetime.now(tz=UTC).date()
+    yesterday = today - timedelta(days=1)
+    return build_window(yesterday, today)
+
+
+@app.function(image=base_image, cpu=4.0, timeout=3600, secrets=_secrets)
+def stack_backfill(
+    start_iso: str,
+    end_iso: str,
+    areas: str = "",
+) -> dict:
+    """On-demand stack build over a window. Same code path as daily.
+
+    Invoke via:
+
+        modal run apps/worker/modal_app.py::stack_backfill \\
+          --start-iso 2023-01-01 --end-iso 2024-04-01
+
+    Optional area subset (comma-separated):
+
+        modal run apps/worker/modal_app.py::stack_backfill \\
+          --start-iso 2024-04-01 --end-iso 2026-05-01 --areas TK,KS
+    """
+    from common.sentry import init_sentry
+    from stack.build_curve import build_window
+
+    init_sentry()
+    start = date.fromisoformat(start_iso)
+    end = date.fromisoformat(end_iso)
+    selected = [a.strip() for a in areas.split(",") if a.strip()] or None
+    return build_window(start, end, selected)
+
+
+# ---------------------------------------------------------------------------
 # Local entry points (for `modal run` to bind to a callable)
 # ---------------------------------------------------------------------------
 
@@ -201,6 +251,7 @@ def run_ingest_daily() -> None:
 
 def _load_sources():
     from ingest.demand import ingest as ingest_demand
+    from ingest.fuel_prices import ingest as ingest_fuel_prices
     from ingest.fx import ingest as ingest_fx
     from ingest.generation_mix import ingest as ingest_generation_mix
     from ingest.holidays import ingest as ingest_holidays
@@ -213,6 +264,7 @@ def _load_sources():
         "ingest_generation_mix": ingest_generation_mix,
         "ingest_weather": ingest_weather,
         "ingest_fx": ingest_fx,
+        "ingest_fuel_prices": ingest_fuel_prices,
         "ingest_holidays": ingest_holidays,
     }
 
