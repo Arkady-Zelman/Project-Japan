@@ -9,6 +9,7 @@
 import { createServerClient } from "@/lib/supabase/server";
 import { IngestStatusTable } from "@/components/dashboard/IngestStatusTable";
 import { StackInspector } from "@/components/dashboard/StackInspector";
+import { RegimePanel } from "@/components/dashboard/RegimePanel";
 
 export const dynamic = "force-dynamic";
 
@@ -121,6 +122,7 @@ export default async function DashboardPage() {
           dataSpans={dataSpans}
         />
         <StackInspector />
+        <RegimePanel />
       </div>
     </main>
   );

@@ -48,8 +48,9 @@ base_image = (
         "pandas>=2.2",
         "sentry-sdk>=2.0",
         "numpy>=1.26",
+        "statsmodels>=0.14",
     )
-    .add_local_python_source("common", "ingest", "seed", "stack")
+    .add_local_python_source("common", "ingest", "seed", "stack", "regime")
 )
 
 # Secret group injected as env vars at runtime. Created by the operator in the
@@ -220,6 +221,49 @@ def stack_backfill(
     end = date.fromisoformat(end_iso)
     selected = [a.strip() for a in areas.split(",") if a.strip()] or None
     return build_window(start, end, selected)
+
+
+# ---------------------------------------------------------------------------
+# Regime engine — weekly recalibration + on-demand backfill (M5)
+# ---------------------------------------------------------------------------
+
+# 18:00 UTC Sun = 03:00 JST Mon. Per spec §7.4 the MRS recalibrates weekly.
+# After ingest_daily + stack_run_daily have populated the previous week's
+# residuals.
+_REGIME_WEEKLY_CRON = modal.Cron("0 18 * * 0")
+
+
+@app.function(image=base_image, cpu=4.0, timeout=3600,
+              schedule=_REGIME_WEEKLY_CRON, secrets=_secrets)
+def regime_calibrate_weekly() -> dict:
+    """Re-fit the 3-regime MRS for every area and refresh `regime_states`.
+
+    Calibration writes both the new `models` row (status='ready', previous
+    `mrs_<area>` rows demoted to 'deprecated') and the per-slot regime
+    posteriors in one atomic transaction — see `regime/mrs_calibrate.py`.
+    """
+    from common.sentry import init_sentry
+    from regime.mrs_calibrate import run_all
+
+    init_sentry()
+    start = date(2023, 1, 1)
+    end = datetime.now(tz=UTC).date() + timedelta(days=1)
+    return run_all(start, end)
+
+
+@app.function(image=base_image, cpu=4.0, timeout=3600, secrets=_secrets)
+def regime_calibrate_run(start_iso: str = "", end_iso: str = "") -> dict:
+    """On-demand calibration for a custom window (or default 2023-01-01 → tomorrow)."""
+    from common.sentry import init_sentry
+    from regime.mrs_calibrate import run_all
+
+    init_sentry()
+    start = date.fromisoformat(start_iso) if start_iso else date(2023, 1, 1)
+    end = (
+        date.fromisoformat(end_iso) if end_iso
+        else datetime.now(tz=UTC).date() + timedelta(days=1)
+    )
+    return run_all(start, end)
 
 
 # ---------------------------------------------------------------------------
