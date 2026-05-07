@@ -29,6 +29,7 @@ from datetime import date
 from common.sentry import init_sentry, tag_source
 
 from .demand import ingest as ingest_demand
+from .fuel_prices import ingest as ingest_fuel_prices
 from .fx import ingest as ingest_fx
 from .generation_mix import ingest as ingest_generation_mix
 from .holidays import ingest as ingest_holidays
@@ -44,6 +45,7 @@ SOURCES: dict[str, Callable[[date, date], IngestResult]] = {
     "ingest_generation_mix": ingest_generation_mix,
     "ingest_weather": ingest_weather,
     "ingest_fx": ingest_fx,
+    "ingest_fuel_prices": ingest_fuel_prices,
     "ingest_holidays": ingest_holidays,
 }
 
