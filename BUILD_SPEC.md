@@ -899,11 +899,18 @@ The `vre_source` in `curve_jsonb`'s top "VRE" step is `'actuals' | 'weather_prox
 
 ### 7.4 Regime state inference (after stack model)
 
-`regime/infer_state.py` runs after the stack model, weekly:
+`regime/mrs_calibrate.py` runs after the stack model, weekly (Sunday 03:00 JST via `regime_calibrate_weekly` Modal cron):
 
-1. Load latest 5 years of `jepx_spot_prices` per area.
-2. Calibrate a 3-regime MRS (Janczura-Weron specification: base + spike + drop, independent spike distribution) per area using `statsmodels.tsa.regime_switching.MarkovRegression`. Saves model parameters as a row in `models` with `type='mrs'`.
-3. Run Hamilton's filter forward, write posterior regime probabilities to `regime_states` for every historical and current slot.
+1. Load every available `jepx_spot_prices` ⨝ `stack_clearing_prices` slot per area (M3 free-tier trim caps history at 2023-01-01; spec originally called for 5 years).
+2. Compute the residual `r_t = log(price_jpy_kwh) − log(modelled_stack_jpy_mwh / 1000)`. This uses the M4 stack output as the deterministic baseline so MRS fits the residual fundamentals/sentiment process directly.
+3. Calibrate a 3-regime MRS via `statsmodels.tsa.regime_switching.markov_regression.MarkovRegression(k_regimes=3, trend='c', switching_variance=True)`. statsmodels doesn't natively support setting AR=0 in spike/drop only (the strict Janczura-Weron spec); the constant-trend + switching-variance fit is a well-known pragmatic approximation. EM tends to converge to one tight low-variance "base" regime + two heavy-tailed regimes capturing both up-spikes and down-drops.
+4. **Label by variance**, not by mean: lowest-variance regime → `base` (normal trading), highest-variance regime → `spike` (heavy-tailed regime that captures upward outliers; in our fits it also catches downward jumps), remaining → `drop`. Index→label mapping persisted in `models.hyperparams.regime_mapping`.
+5. Persist a row in `models` with `type='mrs', name='mrs_<area>', version='v1-<utc_timestamp>', status='ready'`. Previous-version rows for the same `name` get demoted to `status='deprecated'`.
+6. **Same transaction**: write the smoothed posterior probabilities (Hamilton + Kim) to `regime_states` for every slot in the calibration window. This guarantees regime labels match the persisted hyperparameters — separating calibration and inference into two passes (as the spec originally implied) led to label-permutation drift between EM convergences.
+
+The `regime_states.model_version` column lets multiple model_versions coexist; the dashboard joins on the latest `models.status='ready'` row to pick the active version.
+
+**Scarcity-reserve constraint on the stack model.** The MRS calibration depends on `stack_clearing_prices.modelled_price_jpy_mwh` being non-NULL for as many slots as possible. Without a synthetic scarcity reserve in the merit order, peak-load slots (where demand > total dispatchable capacity) get NULL clearing price and drop out of the residual set — exactly the slots where spikes occur, the most informative for regime calibration. `stack/generators_seed.yaml` therefore includes a per-area "Scarcity reserve" generator at SRMC ¥80/kWh (matches JEPX's observed scarcity-bid ceiling); `fuel_type='biomass'` keeps the SRMC fixed via `_NEAR_ZERO_FUEL_CODES` in `srmc.py`.
 
 ### 7.5 VLSTM training (weekly, GPU)
 
@@ -1208,9 +1215,10 @@ At each STOP: commit with a clean message, tell the operator what to test, wait 
 
 ### Milestone 5 — Regime calibration (2-3 days)
 
-- `regime/mrs_calibrate.py` fits 3-regime MRS per area, persists to `models` and `regime_states`.
-- Validation: for the 2021 Jan/Feb spike window, P(spike) ≥ 0.7 on at least 80% of those slots in Tokyo and Tohoku.
-- Operator: queries `regime_states` for Jan-Feb 2021 in Tokyo, confirms spike regime dominates. **STOP.**
+- `regime/mrs_calibrate.py` fits 3-regime MRS per area, persists to `models` and `regime_states` atomically (calibration writes both tables in one transaction so regime labels stay consistent).
+- Pre-fit transform = `log(price_jpy_kwh / (modelled_stack_jpy_mwh / 1000))`. Stack model is the deterministic baseline; MRS captures the residual fundamentals/sentiment process.
+- Validation **(updated 2026-05-07)**: for the **April 2026 spike window** — slots where realised JEPX price > ¥30/kWh — P(spike) ≥ 0.7 on at least 80% of those slots in **both** Tokyo and Tohoku. Original spec called for the 2021 Jan/Feb cold snap; M3's free-tier-driven trim left our DB at 2023-01-01 onward, so we picked the next-best multi-area spike event in our window (TK had 128 spike slots in April 2026, TH had 40).
+- Operator: queries `regime_states` for the April 2026 spike days in Tokyo, confirms spike regime dominates. Or runs `python -m regime.validate`. **STOP.**
 
 ### Milestone 6 — VLSTM (1-2 weeks — biggest single milestone)
 
