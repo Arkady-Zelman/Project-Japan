@@ -143,3 +143,21 @@ generators:
   - {name: "Genkai Nuclear 3-4", operator: "Kyushu Electric", area_code: KY, unit_type_code: steam, fuel_type_code: nuclear, capacity_mw: 2360, efficiency: 0.33, variable_om_jpy_mwh: 1000, co2_intensity_t_mwh: 0.0, availability_factor: 0.85, commissioned: 1994-03-01}
   - {name: "Ohira pumped storage", operator: "Kyushu Electric", area_code: KY, unit_type_code: pumped_storage, fuel_type_code: pumped_storage, capacity_mw: 500, efficiency: 0.75, variable_om_jpy_mwh: 100, co2_intensity_t_mwh: 0.0, commissioned: 1975-04-01}
   - {name: "Hydro fleet (KY aggregate)", operator: "Kyushu / multiple", area_code: KY, unit_type_code: hydro_dam, fuel_type_code: hydro, capacity_mw: 1600, variable_om_jpy_mwh: 100, co2_intensity_t_mwh: 0.0}
+
+  # ============================================================
+  # Scarcity reserve — synthetic per-area unit ensuring the merit-order
+  # curve always crosses demand. Without this, peak-load slots get
+  # NULL modelled_price and the regime model loses its most informative
+  # observations. SRMC ¥80,000/MWh ≈ ¥80/kWh is in line with JEPX's
+  # observed scarcity-bid ceiling. Capacity sized to cover any plausible
+  # peak demand minus other dispatch.
+  # ============================================================
+  - {name: "Scarcity reserve (TK)", operator: "synthetic", area_code: TK, unit_type_code: ocgt, fuel_type_code: biomass, capacity_mw: 30000, variable_om_jpy_mwh: 80000, co2_intensity_t_mwh: 0.0, availability_factor: 1.0, notes: "Synthetic scarcity-cap unit; SRMC ¥80/kWh."}
+  - {name: "Scarcity reserve (HK)", operator: "synthetic", area_code: HK, unit_type_code: ocgt, fuel_type_code: biomass, capacity_mw: 5000, variable_om_jpy_mwh: 80000, co2_intensity_t_mwh: 0.0, availability_factor: 1.0, notes: "Synthetic scarcity-cap unit."}
+  - {name: "Scarcity reserve (TH)", operator: "synthetic", area_code: TH, unit_type_code: ocgt, fuel_type_code: biomass, capacity_mw: 12000, variable_om_jpy_mwh: 80000, co2_intensity_t_mwh: 0.0, availability_factor: 1.0, notes: "Synthetic scarcity-cap unit."}
+  - {name: "Scarcity reserve (CB)", operator: "synthetic", area_code: CB, unit_type_code: ocgt, fuel_type_code: biomass, capacity_mw: 18000, variable_om_jpy_mwh: 80000, co2_intensity_t_mwh: 0.0, availability_factor: 1.0, notes: "Synthetic scarcity-cap unit."}
+  - {name: "Scarcity reserve (HR)", operator: "synthetic", area_code: HR, unit_type_code: ocgt, fuel_type_code: biomass, capacity_mw: 5000, variable_om_jpy_mwh: 80000, co2_intensity_t_mwh: 0.0, availability_factor: 1.0, notes: "Synthetic scarcity-cap unit."}
+  - {name: "Scarcity reserve (KS)", operator: "synthetic", area_code: KS, unit_type_code: ocgt, fuel_type_code: biomass, capacity_mw: 20000, variable_om_jpy_mwh: 80000, co2_intensity_t_mwh: 0.0, availability_factor: 1.0, notes: "Synthetic scarcity-cap unit."}
+  - {name: "Scarcity reserve (CG)", operator: "synthetic", area_code: CG, unit_type_code: ocgt, fuel_type_code: biomass, capacity_mw: 8000, variable_om_jpy_mwh: 80000, co2_intensity_t_mwh: 0.0, availability_factor: 1.0, notes: "Synthetic scarcity-cap unit."}
+  - {name: "Scarcity reserve (SK)", operator: "synthetic", area_code: SK, unit_type_code: ocgt, fuel_type_code: biomass, capacity_mw: 5000, variable_om_jpy_mwh: 80000, co2_intensity_t_mwh: 0.0, availability_factor: 1.0, notes: "Synthetic scarcity-cap unit."}
+  - {name: "Scarcity reserve (KY)", operator: "synthetic", area_code: KY, unit_type_code: ocgt, fuel_type_code: biomass, capacity_mw: 12000, variable_om_jpy_mwh: 80000, co2_intensity_t_mwh: 0.0, availability_factor: 1.0, notes: "Synthetic scarcity-cap unit."}

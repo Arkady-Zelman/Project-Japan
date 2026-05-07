@@ -18,6 +18,8 @@ dependencies = [
     "sentry-sdk>=2.0",
     # M4 — stack engine (numpy used directly in stack/backtest.py for RMSE).
     "numpy>=1.26",
+    # M5 — regime model (Markov regime-switching via Hamilton/Kim filter).
+    "statsmodels>=0.14",
 ]
 
 [project.optional-dependencies]
