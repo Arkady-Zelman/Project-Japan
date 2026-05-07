@@ -8,6 +8,7 @@
 
 import { createServerClient } from "@/lib/supabase/server";
 import { IngestStatusTable } from "@/components/dashboard/IngestStatusTable";
+import { StackInspector } from "@/components/dashboard/StackInspector";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +18,7 @@ const EXPECTED_SOURCES = [
   "ingest_generation_mix",
   "ingest_weather",
   "ingest_fx",
+  "ingest_fuel_prices",
   "ingest_holidays",
 ] as const;
 
@@ -26,6 +28,7 @@ const TABLE_SPANS: { kind: (typeof EXPECTED_SOURCES)[number]; table: string; col
   { kind: "ingest_generation_mix", table: "generation_mix_actuals", column: "slot_start" },
   { kind: "ingest_weather", table: "weather_obs", column: "ts" },
   { kind: "ingest_fx", table: "fx_rates", column: "ts" },
+  { kind: "ingest_fuel_prices", table: "fuel_prices", column: "ts" },
   { kind: "ingest_holidays", table: "jp_holidays", column: "date" },
 ];
 
@@ -111,11 +114,14 @@ export default async function DashboardPage() {
         </p>
       </header>
 
-      <IngestStatusTable
-        expectedSources={[...EXPECTED_SOURCES]}
-        initialRuns={latestRuns}
-        dataSpans={dataSpans}
-      />
+      <div className="space-y-8">
+        <IngestStatusTable
+          expectedSources={[...EXPECTED_SOURCES]}
+          initialRuns={latestRuns}
+          dataSpans={dataSpans}
+        />
+        <StackInspector />
+      </div>
     </main>
   );
 }

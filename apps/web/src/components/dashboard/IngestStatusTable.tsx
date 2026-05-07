@@ -15,6 +15,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { createBrowserClient } from "@/lib/supabase/client";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 import type { DataSpan, LatestRun } from "@/app/(app)/dashboard/page";
 
@@ -128,7 +129,14 @@ export function IngestStatusTable({ expectedSources, initialRuns, dataSpans }: P
   }, [dataSpans]);
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-neutral-200 dark:border-neutral-800">
+    <Card>
+      <CardHeader>
+        <CardTitle>Ingest health</CardTitle>
+        <CardDescription>
+          Per-source view of the daily ingest pipeline. Updates live via Supabase Realtime.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="overflow-x-auto p-0 sm:p-0">
       <table className="w-full text-left text-sm">
         <thead className="bg-neutral-50 text-xs uppercase tracking-wide text-neutral-500 dark:bg-neutral-900/50 dark:text-neutral-400">
           <tr>
@@ -185,6 +193,7 @@ export function IngestStatusTable({ expectedSources, initialRuns, dataSpans }: P
           })}
         </tbody>
       </table>
-    </div>
+      </CardContent>
+    </Card>
   );
 }
