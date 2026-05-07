@@ -56,7 +56,7 @@ Things explicitly **NOT** in the v1 stack (do not add unless the spec is amended
 - Upstash Redis / any external cache — Supabase + Vercel KV are sufficient.
 - LangChain / LangGraph — the agent uses the OpenAI SDK directly.
 
-> **Deferred 2026-04-30:** shadcn/ui install was attempted in M1 and rolled back. The current shadcn registry (`base-nova`, v4) targets Tailwind v4 and pulls in `@base-ui/react` + OKLCH color tokens, which broke against Tailwind v3.4 that `create-next-app@14` ships. M1 ended with no shadcn primitives installed and `apps/web` on Tailwind v3. Decision deferred to **M4** (`/workbench`) when Form/Dialog/Tabs/Tooltip primitives become load-bearing — at that point we either upgrade Tailwind v3 → v4 + install latest shadcn, pin shadcn to a v3-compatible release, or hand-roll. M3 (`/dashboard` ingest-status page) is hand-rolled with Tailwind utilities only.
+> **Resolved 2026-05-06 (M4 Phase 5):** shadcn/ui installed via `npx shadcn@latest init -d`. Tailwind v3.4 retained (the M3 deferral note about a v3↔v4 mismatch turned out to be over-cautious — `shadcn@latest` initializes cleanly against Tailwind v3 with the default `base-nova` preset). Components added: `card`, `tabs`, `tooltip`, `select`, `badge`, `separator`. Dashboard Section C (`StackInspector`) and the M3 IngestStatusTable both render inside shadcn `<Card>`s. Future milestones can `npx shadcn add <component>` mechanically.
 
 ---
 
@@ -830,35 +830,39 @@ All ingest jobs live in `apps/worker/ingest/`. Each is a Modal scheduled functio
 | Job | Source | Schedule | Tables |
 |---|---|---|---|
 | `ingest_jepx_prices` | japanesepower.org CSV (v1) → direct JEPX scrape (v2) | Daily 06:00 | `jepx_spot_prices` |
-| `ingest_demand` | japanesepower.org → OCCTO direct (v2) | Daily 06:00 | `demand_actuals` |
+| `ingest_demand` | Per-utility area-supply CSVs for 5 utilities (TK, HK, TH, HR, SK) + japanesepower.org fallback for 4 deferred utilities, see §7.1.1 | Daily 06:00 | `demand_actuals` |
 | `ingest_generation_mix` | Per-utility area-supply CSVs (TSO publications, see §7.1.1) | Daily 06:05 | `generation_mix_actuals` |
 | `ingest_weather` | Open-Meteo API | Daily 06:10 | `weather_obs` |
-| `ingest_fuel_prices` | CME delayed feeds | Daily 06:15 | `fuel_prices` |
+| `ingest_fuel_prices` | FRED CSV mirror of World Bank Pink Sheet (JKM JP, Newcastle coal, Brent), monthly. CME-direct deferred — paid, not free. | Daily 06:15 | `fuel_prices` |
 | `ingest_fx` | frankfurter (ECB) | Daily 06:20 | `fx_rates` |
 | `ingest_holidays` | `holidays-jp` Python package | Annual | `jp_holidays` |
 | `ingest_jepx_intraday` | japanesepower.org | Daily 14:00 | `jepx_spot_prices` (auction_type='intraday') |
 
-#### 7.1.1 Per-utility area-supply CSVs (`ingest_generation_mix`)
+#### 7.1.1 Per-utility area-supply CSVs (`ingest_generation_mix` + `ingest_demand`)
 
-> **Updated 2026-05-04.** Originally the spec called for "japanesepower.org HH Data" — recon during M3 found that japanesepower.org publishes spot/intraday/demand/weather only, no fuel-mix CSV. Replaced with the official per-utility "エリア需給実績" (area supply-demand record) publications, which are the same datasets OCCTO consumes for cross-area aggregation. URL patterns are stable per-fiscal-year (`area-YYYY.csv` style) and the file shape is consistent: 3-row header (unit + multi-row column header) followed by hourly rows in `万kWh` (1 万kWh per hour = 10 MW continuous).
+> **Updated 2026-05-06 (M4 Phase 0).** Originally the spec called for "japanesepower.org HH Data" — recon during M3 found that japanesepower.org publishes spot/intraday/demand/weather only, no fuel-mix CSV. Replaced with the official per-utility "エリア需給実績" (area supply-demand record) publications, which are the same datasets OCCTO consumes for cross-area aggregation. The same CSV contains BOTH demand and per-fuel generation mix, so `ingest_demand` and `ingest_generation_mix` share one fetcher in `apps/worker/ingest/_area_supply.py` and the lru_cache there means each CSV is fetched once per ingest run.
 
-| Area | Operator | URL pattern | Encoding | M3 status |
-|---|---|---|---|---|
-| TK | TEPCO PG | `https://www.tepco.co.jp/forecast/html/images/area-{fy}.csv` | utf-8-sig | **Implemented** |
-| HK | Hokkaido EPCO | `http://denkiyoho.hepco.co.jp/area/data/jukyu_{fy}_hokkaido.csv` | cp932 | v2 |
-| TH | Tohoku EPCO | `https://setsuden.nw.tohoku-epco.co.jp/common/demand/juyo_{fy}_tohoku.csv` | cp932 | v2 |
-| CB | Chubu EPCO | `https://powergrid.chuden.co.jp/denkiyoho/csv/area_jukyu_{fy}.csv` | cp932 | v2 |
-| HR | Hokuriku EPCO | `https://www.rikuden.co.jp/nw_jyukyudata/attach/area_jukyu_{fy}.csv` | cp932 | v2 |
-| KS | Kansai EPCO | `https://www.kansai-td.co.jp/yamasou/area_jukyu_{fy}.csv` | cp932 | v2 |
-| CG | Chugoku EPCO | `https://www.energia.co.jp/nw/jukyuu/sys/area_jukyu_{fy}.csv` | cp932 | v2 |
-| SK | Shikoku EPCO | `https://www.yonden.co.jp/nw/area_jukyu/csv/jukyu_{fy}.csv` | cp932 | v2 |
-| KY | Kyushu EPCO | `https://www.kyuden.co.jp/td_area_jukyu/csv/jukyu_{fy}.csv` | cp932 | v2 |
+**Three publication families exist.** Phase 0 implements only the **TEPCO-family monthly** format. The other formats are tracked for v2.5; the parser is structured so adding a new family is mostly typing.
 
-Fiscal year `fy` is the Japanese FY (April–March), e.g. fiscal 2023 covers 2023-04-01 → 2024-03-31.
+| Area | Operator | Annual URL pattern | Monthly URL pattern | Encoding | Family | M4 Phase 0 status |
+|---|---|---|---|---|---|---|
+| TK | TEPCO PG | `https://www.tepco.co.jp/forecast/html/images/area-{fy}.csv` | `https://www.tepco.co.jp/forecast/html/images/eria_jukyu_{yyyy}{mm}_03.csv` | utf-8-sig | TEPCO | **Implemented** (annual + monthly) |
+| HK | Hokkaido NW | — | `https://www.hepco.co.jp/network/con_service/public_document/supply_demand_results/csv/eria_jukyu_{yyyy}{mm}_01.csv` | cp932 | TEPCO | **Implemented** (monthly, FY2024-04+) |
+| TH | Tohoku NW | — | `https://setsuden.nw.tohoku-epco.co.jp/common/demand/eria_jukyu_{yyyy}{mm}_02.csv` | cp932 | TEPCO | **Implemented** (monthly, FY2024-04+) |
+| HR | Hokuriku NW | — | `https://www.rikuden.co.jp/nw/denki-yoho/csv/eria_jukyu_{yyyy}{mm}_05.csv` | cp932 | TEPCO | **Implemented** (monthly, FY2024-04+) |
+| SK | Yonden NW | — | `https://www.yonden.co.jp/nw/supply_demand/csv/eria_jukyu_{yyyy}{mm}_08.csv` | cp932 | TEPCO | **Implemented** (monthly, FY2024-04+) |
+| CB | Chubu PG | (no public fuel-mix CSV) | — | — | — | **Deferred** — Chubu only publishes demand-only (`juyo_cepco003.csv`). Fuel mix is paywalled. Stack model uses weather proxy + neighbor interpolation here. |
+| KS | Kansai-TD | `https://www.kansai-td.co.jp/denkiyoho/area-performance/csv/area_jyukyu_jisseki_{fy}.csv` (FY2016-2023 only) | — | cp932 | Kansai | **Deferred** — annual-only, post-FY2023 not published. |
+| CG | Chugoku NW | `https://www.energia.co.jp/nw/service/retailer/data/area/csv/kako-{fy}.csv` (FY2016-2023 only) | — | cp932 | Energia | **Deferred** — annual-only, post-FY2023 not published. Multi-row preamble. |
+| KY | Kyushu NW | `https://www.kyuden.co.jp/td_area_jukyu/csv_area_jyukyu_jisseki/area_jyukyu_jisseki_{fy}_{q}Q.csv` (FY2016-2023, quarterly) | — | cp932 | Kansai | **Deferred** — quarterly-only, post-FY2023 not published. |
 
-The non-TEPCO URL patterns are documented from public landing pages but not yet exercised — confirm exact paths before flipping `_AREA_SOURCES["..."].implemented = True` in `apps/worker/ingest/generation_mix.py`. The parser is generic; column-header idiosyncrasies between utilities (e.g. column name for "Tokyo area demand" varies) may require per-source adjustments.
+Fiscal year `fy` is the Japanese FY (April–March), e.g. fiscal 2023 covers 2023-04-01 → 2024-03-31. Monthly URLs use `yyyy` (calendar year) + `mm` (zero-padded calendar month). Each utility's two-digit suffix (`_01` … `_09`) follows OCCTO's area-code convention: 01=Hokkaido, 02=Tohoku, 03=Tokyo/Chubu, 05=Hokuriku, 08=Shikoku, 09=Kyushu.
 
-**Fuel-bucket consolidation.** The CSV groups all fossil thermal (LNG, coal, oil, biomass-mix) into a single `火力` column. We map this to `fuel_types.code='lng_ccgt'` as the best single-bucket proxy. A v3 ingest can split via separate utility data when METI ENECHO publishes per-fuel breakouts; the schema already supports it because `generation_mix_actuals.fuel_type_id` is a free-form FK.
+**Format families.** TEPCO-family monthly (TK + HK + TH + HR + SK) is a 20-column 30-min schema with units in MW: `DATE, TIME, エリア需要, 原子力, 火力(LNG), 火力(石炭), 火力(石油), 火力(その他), 水力, 地熱, バイオマス, 太陽光発電実績, 太陽光出力制御量, 風力発電実績, 風力出力制御量, 揚水, 蓄電池, 連系線, その他, 合計`. The TEPCO annual (`area-{fy}.csv`) is a coarser 15-column hourly schema with values in 万kWh-per-hour (multiply by 10 for MW) and a single `火力` thermal bucket. Kansai-family (KS, KY) and Energia (CG) families have different layouts requiring family-specific FormatSpecs in `_area_supply.py`.
+
+**Fuel-bucket consolidation.** TEPCO-family monthly splits thermal cleanly into LNG/coal/oil; the annual format and Kansai/Energia families have only a single `火力` column, which we map to `fuel_types.code='lng_ccgt'` as the best single-bucket proxy. The schema (`generation_mix_actuals.fuel_type_id` is a free-form FK) supports any granularity a future format change brings.
+
+**Demand fallback for the 4 deferred utilities.** Until Kansai/Energia/quarterly families ship in v2.5, demand for CB/KS/CG/KY continues to flow from `japanesepower.org/demand.csv` (capped at 2024-03-31). `ingest_demand` writes `source='tso_area_jukyu'` for the 5 implemented utilities and `source='japanesepower_csv'` for the 4 fallback utilities — visible in audit and the dashboard.
 
 ### 7.2 Required behaviour for every ingest job
 
@@ -870,15 +874,28 @@ The non-TEPCO URL patterns are documented from public landing pages but not yet 
 
 ### 7.3 Stack model run (after ingest)
 
-After the price + demand + fuel + weather ingest jobs complete, `stack/build_curve.py` runs:
+After the price + demand + fuel + weather ingest jobs complete, `stack/build_curve.py` runs at 06:30 JST:
 
 1. For each area × slot in the new ingest window:
-   - Pull all `generators` for the area, joined to `generator_availability` for the slot.
-   - For each generator, compute SRMC: `(fuel_price_jpy_mwh / efficiency) + variable_om_jpy_mwh + carbon_cost`. Renewables and nuclear get SRMC ≈ 0. Solar/wind capacity is reduced to the area's actual solar/wind output for that slot (from `generation_mix_actuals`).
+   - Pull all `generators` for the area, joined to `generator_availability` for the slot. (M4: `generator_availability` is empty; defaults from `_DEFAULT_AVAILABILITY` in `build_curve.py` apply per fuel — nuclear 0.30, LNG CCGT 0.90, coal 0.85, oil 0.40.)
+   - For each generator, compute SRMC: `(fuel_price_jpy_mwh / efficiency) + variable_om_jpy_mwh + carbon_cost`. Renewables and pumped storage get SRMC ≈ 0. Nuclear uses `variable_om_jpy_mwh` as the all-in cost (uranium is a constant in v1; see `srmc.py`). Carbon price is hardcoded to ¥0/t — Japan has no compliance market in the v1 backfill window.
+   - Solar/wind capacity is reduced to the area's actual solar/wind output for that slot (see "Capacity reduction for variable renewables" below).
    - Sort ascending by SRMC.
    - Persist as `stack_curves.curve_jsonb` (cumulative MW and SRMC at each step).
 2. Cross with demand: the marginal unit is the one whose cumulative MW first meets `demand_mw`. Persist `stack_clearing_prices`.
-3. Hash the inputs (fuel prices + availability + demand) into `stack_curves.inputs_hash` for cache busting.
+3. Hash the inputs (fuel prices + slot-level VRE + demand + generator nameplate set) into `stack_curves.inputs_hash` for cache busting.
+
+#### Capacity reduction for variable renewables (M4 Phase 0)
+
+Solar and wind output is needed to compute residual demand for the merit-order curve. Two paths:
+
+- **From `generation_mix_actuals`** for the 5 implemented utilities (TK, HK, TH, HR, SK). Real metered output, half-hourly post-2024-04 and hourly historically.
+- **From `apps/worker/stack/weather_proxy.py`** as fallback for the 4 deferred utilities (CB, KS, CG, KY) post-FY2023, and any slot where the per-utility CSV is missing. Formulas:
+  - `solar_mw = installed_pv_mw × (GHI / 1000) × 0.83` (BoS/derate)
+  - `wind_mw = installed_wind_mw × power_curve(wind_mps)` — IEC 61400 Class II turbine, cut-in 3 m/s, rated 12 m/s, cut-out 25 m/s, cubic ramp.
+  - `INSTALLED_CAPACITY_BY_AREA` constant in that module (METI 2024 figures, refresh annually).
+
+The `vre_source` in `curve_jsonb`'s top "VRE" step is `'actuals' | 'weather_proxy' | 'mixed'` — the dashboard tags the slot accordingly so the operator knows when output is estimated.
 
 ### 7.4 Regime state inference (after stack model)
 
