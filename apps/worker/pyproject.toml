@@ -20,12 +20,19 @@ dependencies = [
     "numpy>=1.26",
     # M5 — regime model (Markov regime-switching via Hamilton/Kim filter).
     "statsmodels>=0.14",
+    # M6 — VLSTM probabilistic forecaster + ARIMA gate baseline.
+    # statsmodels (already above) covers the ARIMA baseline. PyTorch +
+    # Lightning train + run inference; pyarrow exports training tensors to
+    # parquet for efficient Modal-container loading.
+    "torch>=2.3,<2.6",
+    "pytorch-lightning>=2.1",
+    "pyarrow>=14",
 ]
 
 [project.optional-dependencies]
 # Heavier deps land at their respective milestones:
 # M5 regime:    statsmodels
-# M6 vlstm:     torch, lightning, numpy, pyarrow
+# M6 vlstm:     torch, lightning, pyarrow  (now in base)
 # M7 lsm:       numba
 # M9 agent:     fastapi, openai, sqlglot
 dev = [

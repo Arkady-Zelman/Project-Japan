@@ -50,3 +50,4 @@ Thumbs.db
 supabase/.temp/
 supabase/.branches/
 supabase/seed.sql
+apps/worker/lightning_logs/

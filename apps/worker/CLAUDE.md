@@ -54,6 +54,16 @@ seed/      M2 — reference data + data dictionary loaders
 - **Bulk-fetch pattern is mandatory.** `stack/build_curve.py::_load_area_cache` does one query per (area, input table). Per-slot DB queries inside the build loop will time out the Tokyo pooler — see SESSION_LOG_2026-05-06 for the diagnostic trail.
 - **UPSERT via `cur.executemany` + `ON CONFLICT (area_id, slot_start) DO UPDATE`.** Two round-trips per chunk, regardless of chunk size.
 
+## VLSTM forecaster discipline (post-M6)
+
+- **One MC-Dropout mask per forward pass, NOT per timestep** — BUILD_SPEC §7.5 step 3 hard requirement. The custom `MCDropout` in `vlstm/model.py` overrides the parent module's `train(mode)` so dropout stays active even after `model.eval()`. Two consecutive forward passes on `model.eval()` should give different outputs (verify: `(y1 - y2).abs().mean() > 1e-6`). Without this, M7 LSM dispatch produces incorrect path-dependent valuations.
+- **One shared cross-area model with an 8-dim area embedding.** Not 9 per-area models. Research-validated for cross-area pooling (Ziel & Weron 2018 + M5.5 research agent). Adds ~70 params for the embedding, simplifies ops (1 row in `models`, 1 `weights.pt` file).
+- **Direct multi-step forecast head**, not autoregressive iteration. Linear `(128 → 48)` outputs all 48 horizons in one shot. Autoregressive loops compound noise and break the one-mask-per-path semantics.
+- **Train on log-price targets** (`y = log(price_jpy_kwh)`); reconstruct paths at inference via `exp(y_hat)`. Stack output appears as an *input feature*, not a target normaliser.
+- **Bulk-fetch per area** like `stack/build_curve._load_area_cache`. The 168-slot lookback × 9 areas × N origins implies thousands of slot-feature lookups; per-slot DB roundtrips will time out the Tokyo pooler.
+- **forecast_paths insert volume**: 9 × 1000 × 48 = 432K rows per twice-daily run. Use `cur.executemany(..., chunk=1000)` with `ON CONFLICT DO UPDATE`. Two round-trips per chunk.
+- **Modal weights cache**: `/tmp/jepx-vlstm/weights.pt` for v1. Supabase Storage upload at `models/<model_id>/weights.pt` is parked M6.5.
+
 ## Milestone status
 
 - M3: Six daily Modal cron ingest jobs live (jepx_prices, demand, generation_mix, weather, fx, holidays).
@@ -61,6 +71,9 @@ seed/      M2 — reference data + data dictionary loaders
 - M4 Phase 1: `ingest_fuel_prices` shipped via FRED CSV mirrors (JKM, Newcastle, Brent). CME-direct deferred.
 - M4 Phase 2-4: Stack engine populated (~73 generators, build_curve.py, backtest harness). RMSE on TK 2023-2024-Q1 = ¥5.3/kWh — gate is ¥3/kWh, FAILS structurally; see SESSION_LOG_2026-05-06 for diagnostic and three options.
 - M4 Phase 5: shadcn/ui installed; `/dashboard` Section C (StackInspector) renders.
+- M5: 3-regime MRS calibrated for all 9 areas via `regime/mrs_calibrate.py`. April 2026 spike-window gate set on TK + TH; gate FAILED at first ship (TK 99.2%, TH 20%) due to Gaussian-mixture EM pathology on skewed residuals.
+- M5.5: POT tail layer added in `regime/pot.py`; combined `p_spike = max(p_mrs, p_pot)`. Gate now PASSES (TK 100%, TH 100%).
+- M6: VLSTM forecaster — `vlstm/{data,model,baseline,train,forecast,validate}.py`. One shared model with 8-dim area embedding, 27 features × 168 lookback, custom MCDropout, 9 × 1000 × 48 paths twice-daily. Dashboard Section B fan chart renders. Gate result recorded in BUILD_SPEC §12 M6 + SESSION_LOG_2026-05-08.
 
 ## Don't
 

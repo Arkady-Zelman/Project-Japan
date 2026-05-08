@@ -49,8 +49,13 @@ base_image = (
         "sentry-sdk>=2.0",
         "numpy>=1.26",
         "statsmodels>=0.14",
+        # M6 — VLSTM forecaster (training on GPU L4, inference on CPU).
+        # torch + lightning + pyarrow (training-tensor parquet export).
+        "torch>=2.3,<2.6",
+        "pytorch-lightning>=2.1",
+        "pyarrow>=14",
     )
-    .add_local_python_source("common", "ingest", "seed", "stack", "regime")
+    .add_local_python_source("common", "ingest", "seed", "stack", "regime", "vlstm")
 )
 
 # Secret group injected as env vars at runtime. Created by the operator in the
@@ -264,6 +269,72 @@ def regime_calibrate_run(start_iso: str = "", end_iso: str = "") -> dict:
         else datetime.now(tz=UTC).date() + timedelta(days=1)
     )
     return run_all(start, end)
+
+
+# ---------------------------------------------------------------------------
+# VLSTM forecaster — weekly L4 training + twice-daily CPU inference (M6)
+# ---------------------------------------------------------------------------
+
+# 17:00 UTC Sun = 02:00 JST Mon. After regime_calibrate_weekly (Sun 18:00 UTC).
+_VLSTM_TRAIN_CRON = modal.Cron("0 17 * * 0")
+# 22:00 UTC = 07:00 JST and 13:00 UTC = 22:00 JST per BUILD_SPEC §7.6.
+_VLSTM_FORECAST_MORNING_CRON = modal.Cron("0 22 * * *")
+_VLSTM_FORECAST_EVENING_CRON = modal.Cron("0 13 * * *")
+
+
+@app.function(image=base_image, gpu="L4", cpu=4.0, timeout=3600,
+              schedule=_VLSTM_TRAIN_CRON, secrets=_secrets)
+def train_vlstm_weekly() -> dict:
+    """Weekly VLSTM retrain on Modal GPU L4.
+
+    Runs the full pipeline: feature extraction → Lightning fit → AR(1)
+    baseline comparison → gate decision → models row + weights save.
+    Falls back to default region if Tokyo doesn't have L4 capacity.
+    """
+    from common.sentry import init_sentry
+    from vlstm.train import train
+
+    init_sentry()
+    today = datetime.now(tz=UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    return train(
+        train_start=datetime(2024, 1, 1, tzinfo=UTC),
+        gate_start=today - timedelta(days=14),
+        gate_end=today,
+        n_epochs=25,
+        stride=4,
+    )
+
+
+@app.function(image=base_image, cpu=2.0, timeout=600, secrets=_secrets)
+def forecast_vlstm_run() -> dict:
+    """On-demand forecast inference at the current top-of-half-hour."""
+    from common.sentry import init_sentry
+    from vlstm.forecast import run_inference
+
+    init_sentry()
+    return run_inference()
+
+
+@app.function(image=base_image, cpu=2.0, timeout=600,
+              schedule=_VLSTM_FORECAST_MORNING_CRON, secrets=_secrets)
+def forecast_vlstm_morning() -> dict:
+    """07:00 JST forecast — same body as `forecast_vlstm_run`."""
+    from common.sentry import init_sentry
+    from vlstm.forecast import run_inference
+
+    init_sentry()
+    return run_inference()
+
+
+@app.function(image=base_image, cpu=2.0, timeout=600,
+              schedule=_VLSTM_FORECAST_EVENING_CRON, secrets=_secrets)
+def forecast_vlstm_evening() -> dict:
+    """22:00 JST forecast — same body as `forecast_vlstm_run`."""
+    from common.sentry import init_sentry
+    from vlstm.forecast import run_inference
+
+    init_sentry()
+    return run_inference()
 
 
 # ---------------------------------------------------------------------------

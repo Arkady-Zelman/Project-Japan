@@ -929,21 +929,25 @@ The `regime_states.model_version` column lets multiple model_versions coexist; t
 
 `vlstm/train.py` — Modal scheduled function, GPU `L4`, schedule `"0 17 * * 0"` (Sunday 02:00 JST = 17:00 UTC Saturday):
 
-1. Pull last 4 years of features from Supabase as parquet to `/tmp` on the Modal container.
-2. Build the input tensor with the five blocks specified in the original brief (autoregressive, calendar, fundamentals incl. stack model output, exogenous drivers, regime probabilities).
-3. Train PyTorch Lightning module with MC Dropout enabled (one mask per path, NOT per timestep — this is critical for path correlation).
-4. Evaluate on held-out most-recent month: RMSE, MAPE, CRPS per area and per horizon.
-5. If new model beats current production by ≥3% RMSE on at least 6 of 9 areas: insert new `models` row with `status='ready'`, mark previous one `status='deprecated'`. Otherwise insert with `status='deprecated'` and log the comparison to `compute_runs`.
-6. Upload weights to Supabase Storage at `models/<model_id>/weights.pt`.
+1. Pull training features over `[train_start, gate_start)` for all 9 areas via `vlstm/data.py::build_training_examples`. Bulk-fetch per area mirrors `stack/build_curve._load_area_cache`. Stride=4 (every 2h) by default produces ~12 examples/area/day, ~40K/area/year. Examples are held in-memory rather than parquet'd to `/tmp` — at our DB size (40-80K examples × 168 × 27 floats ≈ 1-2 GB) memory is cheaper than I/O.
+2. Build the input tensor with the five blocks: **autoregressive** (log price at the slot), **calendar** (sin/cos hour & dow + holiday flag + 4-cat one-hot), **fundamentals** (log stack output, normalised demand, 5-bin generation-mix shares), **exogenous drivers** (temp/wind/GHI + log JKM/coal/oil + USDJPY), **regime probabilities** (p_base/p_spike/p_drop from the latest M5 MRS row). Total: **27 channels per slot × 168 lookback slots**.
+3. Train PyTorch Lightning module with MC Dropout enabled. Architecture: per-timestep linear projection (27→64), 8-dim **area embedding** (one shared cross-area model — research-validated alternative to 9 per-area models, see SESSION_LOG_2026-05-08), 2-layer LSTM hidden 128 with dropout 0.3, custom `MCDropout` (always-on, even in eval — that's "one mask per path") on the LSTM tail, linear head 128→48. Direct multi-step forecast — NOT autoregressive iteration. Adam(lr=1e-3) + ReduceLROnPlateau; EarlyStopping on `val_loss` patience 5; max 25 epochs.
+4. Evaluate on held-out **gate window** `[gate_start, gate_end)` (default last 14 days): per-area RMSE at horizons {1, 6, 12, 24, 48} on rolling 24h-stride forecast origins. RMSE in raw ¥/kWh space (not log) so the gate comparison is interpretable.
+5. Run AR(1) baseline (`vlstm/baseline.py`) on the same gate window: closed-form `y_t = c + φ y_{t-1}` per area, recursive 48-step forecast. RMSE@24h = baseline metric.
+6. **Gate decision** (BUILD_SPEC §12 M6): VLSTM RMSE@24h < AR(1) RMSE@24h on **≥6 of 9 areas** → `models.status='ready'`, mark previous `vlstm_global` row `'deprecated'`. Otherwise → `'deprecated'` with rationale logged to `compute_runs.output`.
+7. Save weights to `/tmp/jepx-vlstm/weights.pt` for v1; Supabase Storage upload at `models/<model_id>/weights.pt` is a parked M6.5 follow-up. `artifact_url` = `file://...` placeholder.
+
+Tokyo region L4 availability is uncertain on Modal; the function falls back to default region without per-region pinning. Weights are stateless so cross-region training is fine even though data lives in `ap-northeast-1`.
 
 ### 7.6 Forecast inference (twice daily, CPU)
 
 `vlstm/forecast.py` — Modal scheduled function, CPU only, schedule `"0 22 * * *"` (07:00 JST) and `"0 13 * * *"` (22:00 JST):
 
-1. Load latest production `models` (`type='vlstm'`, `status='ready'`).
-2. For each of 9 areas, generate 1000 paths × 48 slots ahead.
-3. Insert one `forecast_runs` row, then bulk-insert `forecast_paths` rows.
-4. Auto-trigger re-valuation of all `assets` flagged `metadata->>'auto_revalue' = 'true'`.
+1. Load latest production `models` (`type='vlstm'`, `status='ready'`). Resolve `artifact_url`: file:// for v1, Storage URL once M6.5 lands.
+2. For each of 9 areas, build the 168-slot inference window at the current top-of-half-hour origin.
+3. **Vectorized batch inference**: stack `n_areas × n_paths` (= 9 × 1000 = 9000) into a single tensor `(9000, 168, 27)`. One forward pass with MC dropout active produces `(9000, 48)` log-prices; reshape to `(9, 1000, 48)`. Reconstruct raw prices via `exp(y_hat)`. The "one mask per path" property is automatic — every batch element gets a different MC-dropout mask in a single forward call.
+4. Insert one `forecast_runs` row per area (9 total, same `forecast_origin`). Then bulk-insert `forecast_paths` via `cur.executemany(..., chunk=1000)`. ~432K rows total per inference.
+5. Auto-trigger re-valuation of all `assets` flagged `metadata->>'auto_revalue' = 'true'` — depends on M7 LSM + `valuations` table; left as `# TODO(M7)` for now.
 
 ### 7.7 LSM valuation (on-demand, CPU)
 

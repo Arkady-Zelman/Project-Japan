@@ -10,6 +10,7 @@ import { createServerClient } from "@/lib/supabase/server";
 import { IngestStatusTable } from "@/components/dashboard/IngestStatusTable";
 import { StackInspector } from "@/components/dashboard/StackInspector";
 import { RegimePanel } from "@/components/dashboard/RegimePanel";
+import { ForecastPanel } from "@/components/dashboard/ForecastPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -121,6 +122,7 @@ export default async function DashboardPage() {
           initialRuns={latestRuns}
           dataSpans={dataSpans}
         />
+        <ForecastPanel />
         <StackInspector />
         <RegimePanel />
       </div>
