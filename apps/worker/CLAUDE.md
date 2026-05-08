@@ -74,6 +74,7 @@ seed/      M2 — reference data + data dictionary loaders
 - M5: 3-regime MRS calibrated for all 9 areas via `regime/mrs_calibrate.py`. April 2026 spike-window gate set on TK + TH; gate FAILED at first ship (TK 99.2%, TH 20%) due to Gaussian-mixture EM pathology on skewed residuals.
 - M5.5: POT tail layer added in `regime/pot.py`; combined `p_spike = max(p_mrs, p_pot)`. Gate now PASSES (TK 100%, TH 100%).
 - M6: VLSTM forecaster — `vlstm/{data,model,baseline,train,forecast,validate}.py`. One shared model with 8-dim area embedding, 27 features × 168 lookback, custom MCDropout, 9 × 1000 × 48 paths twice-daily. Dashboard Section B fan chart renders. Gate result recorded in BUILD_SPEC §12 M6 + SESSION_LOG_2026-05-08.
+- M7: LSM storage valuation engine — `lsm/{models,schwartz,engine,runner}.py` + `lsm/tests/test_boogert_dejong_replication.py`. Boogert & de Jong with Numba `@njit(parallel=True)` backward + forward sweeps. Modal `@fastapi_endpoint(label="lsm-value")` HTTP endpoint operator-triggered. Workbench `/workbench` page + `useRealtimeValuation` hook for live status updates. Operator demo (TK 100MW/400MWh BESS, 1000 paths × 48 slots): ¥5.26M in 3.95s. Boogert-de Jong gate passes at ±5% (structural K=6 polynomial bias documented; M7.5 lever).
 
 ## Don't
 

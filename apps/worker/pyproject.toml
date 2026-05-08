@@ -27,13 +27,18 @@ dependencies = [
     "torch>=2.3,<2.6",
     "pytorch-lightning>=2.1",
     "pyarrow>=14",
+    # M7 — LSM storage valuation engine. Numba JIT with parallel=True is
+    # mandatory per BUILD_SPEC §8; without it the backward-induction loop
+    # is unusably slow. PyPI wheels ship precompiled LLVM — no Debian
+    # tooling needed.
+    "numba>=0.59",
 ]
 
 [project.optional-dependencies]
 # Heavier deps land at their respective milestones:
 # M5 regime:    statsmodels
 # M6 vlstm:     torch, lightning, pyarrow  (now in base)
-# M7 lsm:       numba
+# M7 lsm:       numba                       (now in base)
 # M9 agent:     fastapi, openai, sqlglot
 dev = [
     "ruff>=0.6",

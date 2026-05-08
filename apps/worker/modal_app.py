@@ -54,8 +54,11 @@ base_image = (
         "torch>=2.3,<2.6",
         "pytorch-lightning>=2.1",
         "pyarrow>=14",
+        # M7 — LSM storage valuation. Numba JIT with parallel=True is
+        # mandatory; without it the engine is unusably slow.
+        "numba>=0.59",
     )
-    .add_local_python_source("common", "ingest", "seed", "stack", "regime", "vlstm")
+    .add_local_python_source("common", "ingest", "seed", "stack", "regime", "vlstm", "lsm")
 )
 
 # Secret group injected as env vars at runtime. Created by the operator in the
@@ -335,6 +338,70 @@ def forecast_vlstm_evening() -> dict:
 
     init_sentry()
     return run_inference()
+
+
+# ---------------------------------------------------------------------------
+# LSM storage valuation engine — operator-triggered HTTP endpoint (M7)
+# ---------------------------------------------------------------------------
+
+# Per BUILD_SPEC §7.7, LSM is a Modal HTTP endpoint, NOT a scheduled job.
+# Frontend POSTs to it with `{valuation_id}`; the function loads the queued
+# row, runs the LSM, persists results, returns the headline numbers.
+# Numba `parallel=True` requires the cpu=4.0 allocation to actually
+# parallelise across cores.
+
+
+@app.function(image=base_image, cpu=4.0, timeout=600, secrets=_secrets)
+@modal.fastapi_endpoint(method="POST", label="lsm-value")
+def lsm_value(payload: dict) -> dict:
+    """On-demand LSM valuation. Body: `{"valuation_id": "<uuid>"}`.
+
+    Returns the headline numbers; full per-slot decisions are written to
+    `valuation_decisions` and the row is updated to `status='done'` so the
+    frontend can subscribe via Realtime.
+    """
+    from uuid import UUID
+
+    from common.sentry import init_sentry
+    from lsm.runner import mark_failed, run_valuation
+
+    init_sentry()
+    valuation_id_str = payload.get("valuation_id")
+    if not valuation_id_str:
+        return {"error": "valuation_id required"}
+    try:
+        vid = UUID(str(valuation_id_str))
+    except ValueError:
+        return {"error": f"invalid uuid: {valuation_id_str}"}
+    try:
+        result = run_valuation(vid)
+    except Exception as e:
+        mark_failed(vid, repr(e))
+        raise
+    return result.model_dump(mode="json")
+
+
+@app.function(image=base_image, cpu=4.0, timeout=600, secrets=_secrets)
+def lsm_value_run(valuation_id: str) -> dict:
+    """On-demand local-runner variant for `modal run` invocations.
+
+    Same body as the HTTP endpoint; useful for the operator demo
+    (`modal run apps/worker/modal_app.py::lsm_value_run --valuation-id ...`)
+    without needing to set up the public URL.
+    """
+    from uuid import UUID
+
+    from common.sentry import init_sentry
+    from lsm.runner import mark_failed, run_valuation
+
+    init_sentry()
+    vid = UUID(valuation_id)
+    try:
+        result = run_valuation(vid)
+    except Exception as e:
+        mark_failed(vid, repr(e))
+        raise
+    return result.model_dump(mode="json")
 
 
 # ---------------------------------------------------------------------------
