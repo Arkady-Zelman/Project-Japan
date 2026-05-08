@@ -30,8 +30,10 @@ dependencies = [
     # M7 — LSM storage valuation engine. Numba JIT with parallel=True is
     # mandatory per BUILD_SPEC §8; without it the backward-induction loop
     # is unusably slow. PyPI wheels ship precompiled LLVM — no Debian
-    # tooling needed.
+    # tooling needed. FastAPI is required for the @modal.fastapi_endpoint
+    # `lsm-value` HTTP route in modal_app.py.
     "numba>=0.59",
+    "fastapi[standard]>=0.115",
 ]
 
 [project.optional-dependencies]

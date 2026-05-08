@@ -55,8 +55,10 @@ base_image = (
         "pytorch-lightning>=2.1",
         "pyarrow>=14",
         # M7 — LSM storage valuation. Numba JIT with parallel=True is
-        # mandatory; without it the engine is unusably slow.
+        # mandatory; without it the engine is unusably slow. FastAPI is
+        # required for @modal.fastapi_endpoint (the lsm-value HTTP route).
         "numba>=0.59",
+        "fastapi[standard]>=0.115",
     )
     .add_local_python_source("common", "ingest", "seed", "stack", "regime", "vlstm", "lsm")
 )
@@ -110,14 +112,14 @@ def ingest_daily() -> dict[str, dict]:
 
 
 # ---------------------------------------------------------------------------
-# Annual holiday refresh
+# Annual holiday refresh — manual-only on the free Modal tier (5-cron cap).
+# Operator runs `modal run apps/worker/modal_app.py::ingest_holidays_annual`
+# on Jan 1 each year, OR sets a workspace-level reminder. Holidays are loaded
+# 8 years ahead so the manual cadence is forgiving.
 # ---------------------------------------------------------------------------
 
-# 00:05 UTC on Jan 1 ≈ 09:05 JST on Jan 1. Close enough; spec doesn't pin it.
-_ANNUAL_HOLIDAYS_CRON = modal.Cron("5 0 1 1 *")
 
-
-@app.function(image=base_image, schedule=_ANNUAL_HOLIDAYS_CRON, secrets=_secrets)
+@app.function(image=base_image, secrets=_secrets)
 def ingest_holidays_annual() -> dict:
     """Refresh holidays for the next 8 years on Jan 1. Idempotent."""
     from common.sentry import init_sentry
@@ -278,15 +280,17 @@ def regime_calibrate_run(start_iso: str = "", end_iso: str = "") -> dict:
 # VLSTM forecaster — weekly L4 training + twice-daily CPU inference (M6)
 # ---------------------------------------------------------------------------
 
-# 17:00 UTC Sun = 02:00 JST Mon. After regime_calibrate_weekly (Sun 18:00 UTC).
-_VLSTM_TRAIN_CRON = modal.Cron("0 17 * * 0")
 # 22:00 UTC = 07:00 JST and 13:00 UTC = 22:00 JST per BUILD_SPEC §7.6.
 _VLSTM_FORECAST_MORNING_CRON = modal.Cron("0 22 * * *")
 _VLSTM_FORECAST_EVENING_CRON = modal.Cron("0 13 * * *")
 
 
-@app.function(image=base_image, gpu="L4", cpu=4.0, timeout=3600,
-              schedule=_VLSTM_TRAIN_CRON, secrets=_secrets)
+# VLSTM weekly retrain is manual-only on the free Modal tier (5-cron cap).
+# Operator runs `modal run apps/worker/modal_app.py::train_vlstm_weekly` each
+# week, OR upgrades the workspace plan and re-adds the schedule decorator.
+
+
+@app.function(image=base_image, gpu="L4", cpu=4.0, timeout=3600, secrets=_secrets)
 def train_vlstm_weekly() -> dict:
     """Weekly VLSTM retrain on Modal GPU L4.
 
