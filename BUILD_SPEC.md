@@ -1261,9 +1261,21 @@ At each STOP: commit with a clean message, tell the operator what to test, wait 
 ### Milestone 8 — Backtest engine (1 week)
 
 - `backtest/runner.py` replays the four strategies (LSM, intrinsic, rolling-intrinsic, naive-spread) on realised history.
-- Slippage model in `backtest/slippage.py`.
-- `/lab` strategy comparison page.
-- Operator: picks a 12-month window, runs all four strategies on a configured asset, gets P&L curves. **STOP.**
+- Slippage model in `backtest/slippage.py` — linear bid-ask half-spread (operator-configurable, default ¥2/kWh round-trip).
+- `/lab` strategy comparison page renders comparison table + per-strategy equity curves (Recharts) + modelled-vs-realised slippage breakdown bars.
+- Strategy implementations:
+  - **NaiveSpreadStrategy** — threshold rule (charge < buy threshold, discharge > sell threshold). Default thresholds = 30th / 70th percentiles of the window.
+  - **IntrinsicStrategy** — single LSM call on realised prices as 1 path. Perfect foresight upper bound.
+  - **RollingIntrinsicStrategy** — rolling 48-slot LSM at every 2-slot origin using realised future prices as the forecast.
+  - **LSMStackStrategy** (production-causal) — rolling 48-slot LSM at every 2-slot origin using the M4 stack model output as the forecast. The only causal strategy; doesn't peek at realised future.
+- Modal endpoint `@modal.fastapi_endpoint(method="POST", label="run-backtest")` operator-triggered; one row per strategy queued via `/api/run-backtest` and processed in parallel.
+- Operator demo (2026-05-09; TK 100 MW / 400 MWh BESS, April 2026 single-month window):
+  - **intrinsic** ¥246.5M (perfect foresight upper bound)
+  - **rolling_intrinsic** ¥133.7M
+  - **naive_spread** ¥133.1M
+  - **lsm** ¥87.9M (causal, M4-stack-driven)
+  - All ran end-to-end via Modal in ≤30s wall-clock per strategy; equity curves + Sharpe + max drawdown rendered live in `/lab` via Realtime.
+  - **STOP gate PASSES.**
 
 ### Milestone 9 — AI agent (1-2 weeks)
 

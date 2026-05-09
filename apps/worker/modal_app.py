@@ -60,7 +60,9 @@ base_image = (
         "numba>=0.59",
         "fastapi[standard]>=0.115",
     )
-    .add_local_python_source("common", "ingest", "seed", "stack", "regime", "vlstm", "lsm")
+    .add_local_python_source(
+        "common", "ingest", "seed", "stack", "regime", "vlstm", "lsm", "backtest",
+    )
 )
 
 # Secret group injected as env vars at runtime. Created by the operator in the
@@ -404,6 +406,67 @@ def lsm_value_run(valuation_id: str) -> dict:
         result = run_valuation(vid)
     except Exception as e:
         mark_failed(vid, repr(e))
+        raise
+    return result.model_dump(mode="json")
+
+
+# ---------------------------------------------------------------------------
+# Backtest engine — operator-triggered HTTP endpoint (M8)
+# ---------------------------------------------------------------------------
+
+
+@app.function(image=base_image, cpu=4.0, timeout=900, secrets=_secrets)
+@modal.fastapi_endpoint(method="POST", label="run-backtest")
+def run_backtest(payload: dict) -> dict:
+    """On-demand strategy backtest. Body: `{"backtest_id": "<uuid>", "spread_jpy_kwh": 2.0?}`.
+
+    Returns the headline metrics; full per-slot trade rows are persisted
+    in `backtests.trades_jsonb` and the row updates to `status='done'`
+    so the frontend can subscribe via Realtime.
+    """
+    from uuid import UUID
+
+    from common.sentry import init_sentry
+    from backtest.runner import mark_failed, run_backtest as _run_backtest
+
+    init_sentry()
+    backtest_id_str = payload.get("backtest_id")
+    if not backtest_id_str:
+        return {"error": "backtest_id required"}
+    try:
+        bid = UUID(str(backtest_id_str))
+    except ValueError:
+        return {"error": f"invalid uuid: {backtest_id_str}"}
+    spread = float(payload.get("spread_jpy_kwh", 2.0))
+    naive_buy = payload.get("naive_buy_threshold_jpy_kwh")
+    naive_sell = payload.get("naive_sell_threshold_jpy_kwh")
+    try:
+        result = _run_backtest(
+            bid,
+            spread_jpy_kwh=spread,
+            naive_buy=float(naive_buy) if naive_buy is not None else None,
+            naive_sell=float(naive_sell) if naive_sell is not None else None,
+        )
+    except Exception as e:
+        mark_failed(bid, repr(e))
+        raise
+    return result.model_dump(mode="json")
+
+
+@app.function(image=base_image, cpu=4.0, timeout=900, secrets=_secrets)
+def run_backtest_run(backtest_id: str, spread_jpy_kwh: float = 2.0) -> dict:
+    """`modal run` variant of `run_backtest`. Same body."""
+    from uuid import UUID
+
+    from common.sentry import init_sentry
+    from backtest.runner import mark_failed, run_backtest as _run_backtest
+
+    init_sentry()
+    bid = UUID(backtest_id)
+    try:
+        result = _run_backtest(bid, spread_jpy_kwh=spread_jpy_kwh)
+    except Exception as e:
+        mark_failed(bid, repr(e))
         raise
     return result.model_dump(mode="json")
 
