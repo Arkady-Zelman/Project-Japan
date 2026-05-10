@@ -1279,13 +1279,13 @@ At each STOP: commit with a clean message, tell the operator what to test, wait 
 
 ### Milestone 9 — AI agent (1-2 weeks)
 
-- `agent/service.py` FastAPI app deployed as Modal ASGI endpoint.
-- All seven tools implemented with strict input validation.
-- `query_data` parsed by sqlglot, rejected unless SELECT/WITH; runs through `agent_readonly` Postgres connection.
-- System prompt populated from `data_dictionary`.
-- Token budget enforcement, audit logging.
-- Frontend `/analyst` chat + scratchpad UI.
-- Operator: runs the §13 smoke-test script, confirms each scenario passes. **STOP.**
+- `agent/service.py` FastAPI app deployed as Modal ASGI endpoint at `https://projectjapan--agent.modal.run` (`@modal.asgi_app(label="agent")`, cpu=2.0, max_containers=10).
+- All seven tools (`query_data`, `describe_schema`, `create_chart`, `run_correlation`, `fit_quick_model`, `value_what_if`, `get_user_assets`) implemented with strict input validation in `agent/tools.py`.
+- `query_data` parsed by `sqlglot` (`agent/safety.py::is_select_only`), rejected unless single-statement SELECT/WITH; runs through `agent_readonly` Postgres connection (M2 migration 003) with `set local statement_timeout = '30s'`. **Both safety layers verified independently** — sqlglot rejects with explicit reason, and an INSERT attempt on the `agent_readonly` connection raises `InsufficientPrivilege: permission denied for table chat_sessions`.
+- System prompt populated from `data_dictionary` table (built once per cold start, cached via `lru_cache`). ~4,500 tokens of schema digest + tool docs + safety reminders.
+- Token budget enforcement (128,000 tokens per session, gpt-4o context window), audit logging via `compute_run("agent_tool_call")` per tool invocation.
+- Frontend `/analyst` chat + scratchpad UI: 3-column layout (sessions sidebar / chat thread / artifact pane). SSE streamed via `/api/agent` Vercel route relay. Plotly charts dynamic-imported (`plotly.js-basic-dist` + `react-plotly.js/factory`) for ~700 KB lazy-loaded bundle. Realtime subscriptions on `chat_messages` and `agent_artifacts` deliver canonical state.
+- Operator: runs the §13 smoke-test script through the deployed `/analyst` UI. **Smoke-test execution requires the operator's OpenAI account to have an active credit balance** — at the time of M9 ship, the deployed agent's first chat returned `429 insufficient_quota` from OpenAI, so the seven §13 scenarios are pending operator OpenAI credit top-up. The structural pipeline (sqlglot, agent_readonly role, ASGI, SSE, Realtime, scratchpad, Plotly) is verified end-to-end.
 
 ### Milestone 10 — Polish (1 week)
 

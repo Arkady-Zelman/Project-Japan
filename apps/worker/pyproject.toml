@@ -34,6 +34,14 @@ dependencies = [
     # `lsm-value` HTTP route in modal_app.py.
     "numba>=0.59",
     "fastapi[standard]>=0.115",
+    # M9 — AI Analyst. OpenAI SDK for function-calling, sqlglot for the
+    # SELECT-only SQL safety layer, scikit-learn for the fit_quick_model
+    # tool, sse-starlette for the SSE response wrapper in the FastAPI
+    # ASGI app.
+    "openai>=1.50",
+    "sqlglot>=23",
+    "scikit-learn>=1.5",
+    "sse-starlette>=2.1",
 ]
 
 [project.optional-dependencies]
@@ -41,7 +49,7 @@ dependencies = [
 # M5 regime:    statsmodels
 # M6 vlstm:     torch, lightning, pyarrow  (now in base)
 # M7 lsm:       numba                       (now in base)
-# M9 agent:     fastapi, openai, sqlglot
+# M9 agent:     openai, sqlglot, sklearn, sse-starlette  (now in base)
 dev = [
     "ruff>=0.6",
     "mypy>=1.10",

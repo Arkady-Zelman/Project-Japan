@@ -59,9 +59,17 @@ base_image = (
         # required for @modal.fastapi_endpoint (the lsm-value HTTP route).
         "numba>=0.59",
         "fastapi[standard]>=0.115",
+        # M9 — AI Analyst. OpenAI SDK + sqlglot for SELECT-only SQL guard +
+        # scikit-learn for fit_quick_model + sse-starlette for streaming
+        # responses out of the agent ASGI app.
+        "openai>=1.50",
+        "sqlglot>=23",
+        "scikit-learn>=1.5",
+        "sse-starlette>=2.1",
     )
     .add_local_python_source(
-        "common", "ingest", "seed", "stack", "regime", "vlstm", "lsm", "backtest",
+        "common", "ingest", "seed", "stack", "regime", "vlstm", "lsm",
+        "backtest", "agent",
     )
 )
 
@@ -469,6 +477,27 @@ def run_backtest_run(backtest_id: str, spread_jpy_kwh: float = 2.0) -> dict:
         mark_failed(bid, repr(e))
         raise
     return result.model_dump(mode="json")
+
+
+# ---------------------------------------------------------------------------
+# AI Analyst — FastAPI ASGI service (M9)
+# ---------------------------------------------------------------------------
+
+# Per BUILD_SPEC §11, the agent is a single ASGI app exposing /health and
+# /chat (SSE). max_containers caps concurrency per Modal billing.
+
+
+@app.function(
+    image=base_image, cpu=2.0, timeout=300, secrets=_secrets,
+    max_containers=10,
+)
+@modal.asgi_app(label="agent")
+def agent_app():
+    from common.sentry import init_sentry
+
+    init_sentry()
+    from agent.service import build_app
+    return build_app()
 
 
 # ---------------------------------------------------------------------------
