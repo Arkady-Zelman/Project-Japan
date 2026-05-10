@@ -69,7 +69,12 @@ base_image = (
     )
     .add_local_python_source(
         "common", "ingest", "seed", "stack", "regime", "vlstm", "lsm",
-        "backtest", "agent",
+        "backtest",
+        # M9 agent shelved 2026-05-10 — see SESSION_LOG_2026-05-10-M9.md.
+        # The Python sources (apps/worker/agent/*.py) are intact on disk.
+        # To resume: re-add "agent" to this list and uncomment agent_app
+        # below, then `modal deploy`. OpenAI quota is the prerequisite.
+        # "agent",
     )
 )
 
@@ -480,24 +485,32 @@ def run_backtest_run(backtest_id: str, spread_jpy_kwh: float = 2.0) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# AI Analyst — FastAPI ASGI service (M9)
+# AI Analyst — FastAPI ASGI service (M9) — SHELVED 2026-05-10
 # ---------------------------------------------------------------------------
 
-# Per BUILD_SPEC §11, the agent is a single ASGI app exposing /health and
-# /chat (SSE). max_containers caps concurrency per Modal billing.
+# Shelved on 2026-05-10 because the operator's OpenAI account hit
+# `429 insufficient_quota` on the first end-to-end /chat call. The
+# pipeline (sqlglot + agent_readonly role + ASGI + SSE + Realtime +
+# scratchpad) is structurally verified end-to-end; the §13 smoke-test
+# scenarios pend operator OpenAI credit top-up. To resume:
+#   1. Re-add "agent" to add_local_python_source above.
+#   2. Uncomment the @app.function block below.
+#   3. `modal deploy modal_app.py`.
+#   4. Verify `https://projectjapan--agent.modal.run/health` returns 200,
+#      then run the §13 smoke-test scenarios in /analyst.
+# See SESSION_LOG_2026-05-10-M9.md for full context.
 
-
-@app.function(
-    image=base_image, cpu=2.0, timeout=300, secrets=_secrets,
-    max_containers=10,
-)
-@modal.asgi_app(label="agent")
-def agent_app():
-    from common.sentry import init_sentry
-
-    init_sentry()
-    from agent.service import build_app
-    return build_app()
+# @app.function(
+#     image=base_image, cpu=2.0, timeout=300, secrets=_secrets,
+#     max_containers=10,
+# )
+# @modal.asgi_app(label="agent")
+# def agent_app():
+#     from common.sentry import init_sentry
+#
+#     init_sentry()
+#     from agent.service import build_app
+#     return build_app()
 
 
 # ---------------------------------------------------------------------------
