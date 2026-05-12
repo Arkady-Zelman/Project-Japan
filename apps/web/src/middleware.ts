@@ -16,7 +16,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { updateSession } from "@/lib/supabase/middleware";
 
 const ANON_PATHS = new Set(["/", "/dashboard", "/login", "/workbench", "/lab"]);
-const ANON_PATH_PREFIXES = ["/auth/", "/login/", "/api/forecast-paths", "/api/regime-states", "/api/stack-curve", "/api/regional-balance", "/api/stack-curve/latest", "/api/bos-strategy", "/api/demo-valuation", "/api/demo-backtest"];
+const ANON_PATH_PREFIXES = ["/auth/", "/login/", "/api/forecast-paths", "/api/regime-states", "/api/stack-curve", "/api/regional-balance", "/api/stack-curve/latest", "/api/bos-strategy", "/api/demo-valuation", "/api/demo-backtest", "/api/region-history"];
 const PROTECTED_PAGE_PREFIXES: string[] = [];
 const PROTECTED_API_PREFIXES = ["/api/value-asset", "/api/run-backtest", "/api/assets"];
 

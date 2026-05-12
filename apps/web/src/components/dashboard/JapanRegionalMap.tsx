@@ -24,7 +24,7 @@ import {
 
 import type { RegionalBalance } from "@/app/api/regional-balance/route";
 
-type Metric = "vre_share" | "balance_pct" | "price";
+export type Metric = "vre_share" | "balance_pct" | "price";
 
 const METRICS: { id: Metric; label: string; help: string }[] = [
   { id: "vre_share", label: "VRE share", help: "Share of demand met by solar, wind and hydro" },
@@ -145,12 +145,16 @@ function bboxFromPath(d: string): { cx: number; cy: number } {
 export function JapanRegionalMap({
   selected,
   onSelect,
+  metric,
+  onMetricChange,
 }: {
   selected: RegionCode | null;
   onSelect: (code: RegionCode | null) => void;
+  metric: Metric;
+  onMetricChange: (next: Metric) => void;
 }) {
   const { rows, slotStart, loading, error } = useRealtimeRegionalBalance();
-  const [metric, setMetric] = useState<Metric>("vre_share");
+  const setMetric = onMetricChange;
   const [hovered, setHovered] = useState<RegionCode | null>(null);
 
   const rowsByCode = useMemo(() => {

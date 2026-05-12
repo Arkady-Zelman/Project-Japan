@@ -14,7 +14,7 @@ import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useMemo, useState } from "react";
 
-import { JapanRegionalMap } from "@/components/dashboard/JapanRegionalMap";
+import { JapanRegionalMap, type Metric } from "@/components/dashboard/JapanRegionalMap";
 import { RegionDetail } from "@/components/dashboard/RegionDetail";
 import { StrategyTab } from "@/components/dashboard/StrategyTab";
 import { ComputeRunsTable } from "@/components/dashboard/ComputeRunsTable";
@@ -91,6 +91,7 @@ export function DashboardClient({
   const [selectedRegion, setSelectedRegion] = useState<RegionCode | null>(
     (areaParam as RegionCode | null) ?? null,
   );
+  const [metric, setMetric] = useState<Metric>("vre_share");
 
   const { rows, slotStart, loading, error, refresh, fetchedAt } = useRealtimeRegionalBalance();
 
@@ -220,8 +221,17 @@ export function DashboardClient({
           <>
             {active === "map" && (
               <div>
-                <JapanRegionalMap selected={selectedRegion} onSelect={setRegion} />
-                <RegionDetail row={selectedRow} onClose={() => setRegion(null)} />
+                <JapanRegionalMap
+                  selected={selectedRegion}
+                  onSelect={setRegion}
+                  metric={metric}
+                  onMetricChange={setMetric}
+                />
+                <RegionDetail
+                  row={selectedRow}
+                  metric={metric}
+                  onClose={() => setRegion(null)}
+                />
               </div>
             )}
             {active === "strategy" && <StrategyTab />}

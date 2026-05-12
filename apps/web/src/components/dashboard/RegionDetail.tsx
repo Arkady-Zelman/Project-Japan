@@ -11,14 +11,18 @@ import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip as ReTooltip } from "
 
 import { MetricCard } from "@/components/ui/metric-card";
 import { fuelColor } from "@/lib/fuel-colors";
+import { RegionHistoryChart } from "@/components/dashboard/RegionHistoryChart";
+import type { Metric } from "@/components/dashboard/JapanRegionalMap";
 
 import type { RegionalBalance } from "@/app/api/regional-balance/route";
 
 export function RegionDetail({
   row,
+  metric,
   onClose,
 }: {
   row: RegionalBalance | null;
+  metric: Metric;
   onClose: () => void;
 }) {
   const pieData = useMemo(() => {
@@ -158,6 +162,11 @@ export function RegionDetail({
           </table>
         </div>
       </div>
+
+      <RegionHistoryChart
+        primary={row.code as Parameters<typeof RegionHistoryChart>[0]["primary"]}
+        metric={metric}
+      />
 
       <footer className="mt-4 border-t border-foreground/5 pt-3 text-xs text-muted-foreground">
         <Link
