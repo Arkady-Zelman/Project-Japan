@@ -16,9 +16,9 @@ import { NextResponse, type NextRequest } from "next/server";
 import { updateSession } from "@/lib/supabase/middleware";
 
 const ANON_PATHS = new Set(["/", "/dashboard", "/login"]);
-const ANON_PATH_PREFIXES = ["/auth/", "/login/", "/api/forecast-paths", "/api/regime-states", "/api/stack-curve", "/api/regional-balance", "/api/stack-curve/latest"];
+const ANON_PATH_PREFIXES = ["/auth/", "/login/", "/api/forecast-paths", "/api/regime-states", "/api/stack-curve", "/api/regional-balance", "/api/stack-curve/latest", "/api/bos-strategy"];
 const PROTECTED_PAGE_PREFIXES = ["/workbench", "/lab"];
-const PROTECTED_API_PREFIXES = ["/api/value-asset", "/api/run-backtest", "/api/assets", "/api/bos-strategy"];
+const PROTECTED_API_PREFIXES = ["/api/value-asset", "/api/run-backtest", "/api/assets"];
 
 function isAnon(pathname: string) {
   if (ANON_PATHS.has(pathname)) return true;
