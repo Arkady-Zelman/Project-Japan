@@ -35,9 +35,6 @@ A Boogert & de Jong (2006) Least-Squares Monte-Carlo engine, adapted from gas-st
 
 Alongside it sits a **Basket of Spreads** valuation (Baker / O'Brien / Ogden / Strickland, *Risk* 2017) — the same problem solved as a portfolio of spread options, which is faster, more intuitive, and useful as a cross-check.
 
-### 4. AI Analyst — natural-language access to all of the above
-An OpenAI function-calling agent with read-only SQL access (via a dedicated Postgres role and a `SELECT`-only parser), a chart scratchpad, and the ability to run *what-if* storage valuations on the fly. Every tool call is audited. "Show me Hokkaido's residual demand during the May 2024 spike" gets the right query, the right chart, and a written explanation — without anyone learning SQL.
-
 A **backtest engine** ties the three quant engines together so each new model release can be compared against actual market outcomes before going live.
 
 ---
@@ -52,7 +49,7 @@ Other tabs cover the price forecast (fan chart with confidence bands), the stack
 
 ---
 
-## Architecture, one paragraph
+## Architecture
 
 A Turborepo monorepo. The web app is **Next.js 14** (App Router, TypeScript) deployed to **Vercel** in Tokyo. The Python worker — ingest jobs, VLSTM training and inference, LSM engine, AI agent — runs on **Modal** in Tokyo. The database is **Supabase** Postgres in Tokyo, with Realtime channels feeding the dashboard live. Region-locked end to end because the page chains five or more dependent calls and every millisecond shows up. The only scheduler is Modal's `@app.function(schedule=...)` — no Airflow, no Prefect, no Redis. Postgres handles the half-hourly volume on its own.
 
@@ -102,8 +99,6 @@ cd ../..
 # 6. Run
 npm run dev                                    # http://localhost:3000
 ```
-
-Deploy to Vercel: see `apps/web/DEPLOY.md`.
 
 ---
 
