@@ -30,7 +30,12 @@ export function MetricCard({
   return (
     <div
       className={cn(
-        "rounded-xl bg-card px-4 py-3 ring-1 ring-foreground/10",
+        "relative overflow-hidden rounded-xl px-4 py-3",
+        "bg-[linear-gradient(180deg,rgba(255,255,255,0.10)_0%,rgba(255,255,255,0.025)_22%,transparent_60%),rgba(30,32,40,0.36)]",
+        "backdrop-blur-[28px] backdrop-saturate-[1.45]",
+        "shadow-[inset_0_1px_0_rgba(255,255,255,0.14),inset_0_0_0_1px_rgba(255,255,255,0.08)]",
+        "before:absolute before:left-0 before:top-3.5 before:bottom-3.5 before:w-0.5 before:rounded-sm",
+        "before:bg-gradient-to-b before:from-blue-500/55 before:to-transparent",
         className,
       )}
     >

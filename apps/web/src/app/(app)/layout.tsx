@@ -23,10 +23,19 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <Suspense fallback={null}>
         <PosthogProvider userId={user?.id ?? null} email={user?.email ?? null} />
       </Suspense>
-      <header className="border-b border-neutral-200 bg-white/70 backdrop-blur dark:border-neutral-800 dark:bg-neutral-950/70">
-        <div className="mx-auto flex h-14 w-full max-w-[1600px] items-center justify-between gap-3 px-4 sm:px-6">
-          <nav className="flex items-center gap-3 text-sm sm:gap-6">
-            <Link href="/dashboard" className="font-semibold tracking-tight">JEPX-Storage</Link>
+      <header className="sticky top-0 z-30 border-b border-white/[0.06] bg-[linear-gradient(180deg,rgba(15,15,18,0.78),rgba(15,15,18,0.62))] backdrop-blur-[18px] backdrop-saturate-[1.2] shadow-[0_1px_0_rgba(255,255,255,0.04)]">
+        <div className="mx-auto flex h-[60px] w-full max-w-[1600px] items-center justify-between gap-3 px-7">
+          <nav className="flex items-center gap-6 text-sm">
+            <Link
+              href="/dashboard"
+              className="inline-flex items-center gap-2.5 font-semibold tracking-tight"
+            >
+              <span
+                aria-hidden
+                className="inline-block size-2 rounded-full bg-[radial-gradient(circle_at_30%_30%,#fda4af,#be123c_70%)] shadow-[0_0_8px_rgba(244,63,94,0.55)]"
+              />
+              JEPX-Storage
+            </Link>
             <Link href="/dashboard" className="text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100">Dashboard</Link>
             <Link href="/workbench" className="text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100">Workbench</Link>
             <Link href="/lab" className="text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100">Lab</Link>

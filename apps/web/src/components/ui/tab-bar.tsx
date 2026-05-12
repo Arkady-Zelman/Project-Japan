@@ -46,7 +46,7 @@ export function TabBar<T extends string = string>({
               className={cn(
                 "relative -mb-px border-b-2 px-3 py-2 text-sm font-medium transition",
                 active
-                  ? "border-foreground text-foreground"
+                  ? "border-white/85 text-foreground"
                   : "border-transparent text-muted-foreground hover:text-foreground",
               )}
             >

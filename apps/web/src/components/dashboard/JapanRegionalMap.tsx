@@ -19,7 +19,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useRealtimeRegionalBalance } from "@/hooks/useRealtimeRegionalBalance";
 import {
   REGION_PATHS,
-  VIEW_BOX,
   type RegionCode,
 } from "@/lib/japan-region-paths";
 
@@ -91,6 +90,58 @@ function formatValue(v: number | null, m: Metric): string {
   return "—";
 }
 
+/**
+ * Visual centroid of an SVG path. Splits on M/m, finds the sub-path with
+ * the biggest bounding box, and averages its vertex coordinates — a better
+ * label anchor than the bbox-centroid for irregular shapes like Japan's
+ * regions (Hokkaido, Kyushu have many islands; we want the label on the
+ * main mass, not floating between sub-paths).
+ */
+function bboxFromPath(d: string): { cx: number; cy: number } {
+  const subs: string[] = [];
+  let cur = "";
+  for (let i = 0; i < d.length; i++) {
+    const ch = d[i] ?? "";
+    if ((ch === "M" || ch === "m") && cur.length) {
+      subs.push(cur);
+      cur = ch;
+    } else {
+      cur += ch;
+    }
+  }
+  if (cur.length) subs.push(cur);
+
+  let best: { cx: number; cy: number; area: number } | null = null;
+  for (const s of subs) {
+    const nums = s.match(/-?\d+(?:\.\d+)?/g);
+    if (!nums || nums.length < 4) continue;
+    let xMin = Infinity;
+    let yMin = Infinity;
+    let xMax = -Infinity;
+    let yMax = -Infinity;
+    let sumX = 0;
+    let sumY = 0;
+    let n = 0;
+    for (let i = 0; i + 1 < nums.length; i += 2) {
+      const x = +(nums[i] ?? "0");
+      const y = +(nums[i + 1] ?? "0");
+      if (x < xMin) xMin = x;
+      if (x > xMax) xMax = x;
+      if (y < yMin) yMin = y;
+      if (y > yMax) yMax = y;
+      sumX += x;
+      sumY += y;
+      n++;
+    }
+    if (n === 0) continue;
+    const area = (xMax - xMin) * (yMax - yMin);
+    if (!best || area > best.area) {
+      best = { cx: sumX / n, cy: sumY / n, area };
+    }
+  }
+  return best ?? { cx: 400, cy: 400 };
+}
+
 export function JapanRegionalMap({
   selected,
   onSelect,
@@ -107,6 +158,13 @@ export function JapanRegionalMap({
     for (const r of rows) m.set(r.code, r);
     return m;
   }, [rows]);
+
+  // Largest-sub-path centroid per region — drives the on-map label position.
+  const centroids = useMemo(() => {
+    const m = new Map<string, { cx: number; cy: number }>();
+    for (const p of REGION_PATHS) m.set(p.code, bboxFromPath(p.d));
+    return m;
+  }, []);
 
   const { vMin, vMax } = useMemo(() => {
     let lo = Infinity, hi = -Infinity;
@@ -125,7 +183,7 @@ export function JapanRegionalMap({
   }
 
   return (
-    <div className="rounded-xl bg-card p-4 ring-1 ring-foreground/10">
+    <div className="glass p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-base font-medium">Regional snapshot</h2>
@@ -158,9 +216,10 @@ export function JapanRegionalMap({
       <div className="grid grid-cols-1 gap-6 md:grid-cols-[minmax(0,1fr)_260px]">
         <div className="relative w-full">
           <svg
-            viewBox={`${VIEW_BOX.x} ${VIEW_BOX.y} ${VIEW_BOX.w} ${VIEW_BOX.h}`}
-            className="mx-auto block h-auto w-full max-w-[820px]"
+            viewBox="150 50 520 500"
             preserveAspectRatio="xMidYMid meet"
+            className="mx-auto block h-auto w-full"
+            style={{ maxHeight: 540 }}
             role="img"
             aria-label="Japan utility regions"
           >
@@ -188,7 +247,93 @@ export function JapanRegionalMap({
                 );
               })}
             </g>
+
+            {/* Region code + value labels at the largest-sub-path centroid
+                of each region — keeps the label on the visible mass even
+                for fragmented shapes like Hokkaido and Kyushu. */}
+            <g style={{ pointerEvents: "none" }}>
+              {REGION_PATHS.map((p) => {
+                const c = centroids.get(p.code);
+                if (!c) return null;
+                const row = rowsByCode.get(p.code);
+                const value = valueForMetric(row, metric);
+                const isSelected = selected === p.code;
+                return (
+                  <g key={p.code + "_lbl"} transform={`translate(${c.cx}, ${c.cy})`}>
+                    <text
+                      textAnchor="middle"
+                      y="-3"
+                      fontSize="16"
+                      fontWeight="700"
+                      fill={isSelected ? "#f8fafc" : "#0b1220"}
+                      style={{
+                        paintOrder: "stroke",
+                        stroke: "rgba(255,255,255,0.9)",
+                        strokeWidth: isSelected ? 0 : 3,
+                        strokeLinejoin: "round",
+                      }}
+                    >
+                      {p.code}
+                    </text>
+                    <text
+                      textAnchor="middle"
+                      y="13"
+                      fontSize="13"
+                      fontWeight="600"
+                      fill={isSelected ? "#f8fafc" : "#0b1220"}
+                      style={{
+                        paintOrder: "stroke",
+                        stroke: "rgba(255,255,255,0.9)",
+                        strokeWidth: isSelected ? 0 : 3,
+                        strokeLinejoin: "round",
+                      }}
+                    >
+                      {formatValue(value, metric)}
+                    </text>
+                  </g>
+                );
+              })}
+            </g>
           </svg>
+
+          {/* Okinawa inset — bottom-left of the map area. Reuses the KY
+              path with a viewBox cropped to the Ryukyu archipelago; click
+              triggers the same onSelect("KY") as the main map. */}
+          {(() => {
+            const ky = REGION_PATHS.find((r) => r.code === "KY");
+            if (!ky) return null;
+            const row = rowsByCode.get("KY");
+            const value = valueForMetric(row, metric);
+            const fill = colorFor(value, metric, vMin, vMax);
+            const isSelected = selected === "KY";
+            return (
+              <div
+                onClick={() => onSelect(isSelected ? null : "KY")}
+                title="Okinawa (part of Kyushu / KY)"
+                className="absolute bottom-1 left-1 w-[156px] cursor-pointer rounded-[10px] bg-[linear-gradient(180deg,rgba(255,255,255,0.10)_0%,rgba(255,255,255,0.03)_40%,transparent_70%),rgba(28,30,38,0.45)] px-2 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.16),inset_0_0_0_1px_rgba(255,255,255,0.10)] backdrop-blur-[20px] backdrop-saturate-[1.4]"
+              >
+                <div className="mb-0.5 flex items-baseline justify-between">
+                  <span className="text-[9.5px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+                    Okinawa
+                  </span>
+                  <span className="text-[10px] text-muted-foreground">part of KY</span>
+                </div>
+                <svg
+                  viewBox="115 645 130 85"
+                  preserveAspectRatio="xMidYMid meet"
+                  className="block h-[78px] w-full"
+                  aria-label="Okinawa islands"
+                >
+                  <path
+                    d={ky.d}
+                    fill={fill}
+                    stroke={isSelected ? "#1d4ed8" : "#cbd5e1"}
+                    strokeWidth={isSelected ? 1 : 0.4}
+                  />
+                </svg>
+              </div>
+            );
+          })()}
         </div>
 
         {/* Region list (also serves as the mobile fallback when the SVG is small) */}

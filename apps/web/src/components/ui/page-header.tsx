@@ -22,7 +22,9 @@ export function PageHeader({
     <header className={cn("mb-8 space-y-4", className)}>
       <div className="flex items-start justify-between gap-4">
         <div className="space-y-2">
-          <h1 className="text-3xl font-semibold tracking-tight md:text-4xl">{title}</h1>
+          <h1 className="bg-gradient-to-b from-white to-slate-300 bg-clip-text text-3xl font-semibold leading-[1.05] tracking-[-0.028em] text-transparent md:text-4xl">
+            {title}
+          </h1>
           {description && (
             <p className="max-w-3xl text-sm text-muted-foreground">{description}</p>
           )}
