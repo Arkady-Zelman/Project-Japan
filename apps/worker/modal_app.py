@@ -69,7 +69,7 @@ base_image = (
     )
     .add_local_python_source(
         "common", "ingest", "seed", "stack", "regime", "vlstm", "lsm",
-        "backtest",
+        "backtest", "demo",
         # M9 agent shelved 2026-05-10 — see SESSION_LOG_2026-05-10-M9.md.
         # The Python sources (apps/worker/agent/*.py) are intact on disk.
         # To resume: re-add "agent" to this list and uncomment agent_app
@@ -210,14 +210,55 @@ _STACK_DAILY_CRON = modal.Cron("30 21 * * *")
 
 @app.function(image=base_image, cpu=2.0, timeout=900, schedule=_STACK_DAILY_CRON, secrets=_secrets)
 def stack_run_daily() -> dict:
-    """Build merit-order curves for yesterday across every area."""
+    """Build merit-order curves for yesterday across every area.
+
+    Also fires the public-demo refresh (`demo_daily`) so the /workbench and
+    /lab pages always show last-24h results without needing a real user
+    session. Demo is fire-and-forget (`.spawn`) so stack runtime isn't
+    affected by LSM/backtest latency.
+    """
     from common.sentry import init_sentry
     from stack.build_curve import build_window
 
     init_sentry()
     today = datetime.now(tz=UTC).date()
     yesterday = today - timedelta(days=1)
-    return build_window(yesterday, today)
+    out = build_window(yesterday, today)
+
+    try:
+        demo_daily.spawn()
+        out["demo_spawned"] = True
+    except Exception as e:  # noqa: BLE001
+        out["demo_spawned"] = f"error: {e}"
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Demo daily refresh — public /workbench + /lab examples
+# ---------------------------------------------------------------------------
+
+# Not on its own schedule (would exceed Modal's 5-cron free-tier cap).
+# Spawned from stack_run_daily so it fires automatically every 06:30 JST.
+# Operator can also run on demand:
+#   modal run apps/worker/modal_app.py::demo_daily_run
+@app.function(image=base_image, cpu=4.0, timeout=1800, secrets=_secrets)
+def demo_daily() -> dict:
+    """Refresh the public demo: LSM valuation + 4-strategy backtest."""
+    from common.sentry import init_sentry
+    from demo.run_daily import run as run_demo
+
+    init_sentry()
+    return run_demo()
+
+
+@app.function(image=base_image, cpu=4.0, timeout=1800, secrets=_secrets)
+def demo_daily_run() -> dict:
+    """On-demand variant of `demo_daily` for `modal run` invocations."""
+    from common.sentry import init_sentry
+    from demo.run_daily import run as run_demo
+
+    init_sentry()
+    return run_demo()
 
 
 @app.function(image=base_image, cpu=4.0, timeout=3600, secrets=_secrets)
@@ -400,8 +441,11 @@ def forecast_vlstm_morning() -> dict:
     return run_inference()
 
 
-@app.function(image=base_image, cpu=2.0, timeout=600,
-              schedule=_VLSTM_FORECAST_EVENING_CRON, secrets=_secrets)
+# Evening forecast schedule dropped 2026-05-13 to make room within Modal's
+# 5-cron free-tier cap for the demo daily refresh. Morning forecast
+# (07:00 JST) still runs automatically; operator can fire the evening one
+# on demand via `modal run apps/worker/modal_app.py::forecast_vlstm_run`.
+@app.function(image=base_image, cpu=2.0, timeout=600, secrets=_secrets)
 def forecast_vlstm_evening() -> dict:
     """22:00 JST forecast — same body as `forecast_vlstm_run`."""
     from common.sentry import init_sentry
