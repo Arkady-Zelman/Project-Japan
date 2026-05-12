@@ -228,6 +228,10 @@ export function BacktestResults({ backtestIds }: Props) {
                     ]}
                   />
                   <Legend
+                    verticalAlign="top"
+                    align="center"
+                    height={32}
+                    wrapperStyle={{ paddingBottom: 8, fontSize: 11 }}
                     formatter={(v) => STRATEGY_LABELS[String(v)] ?? String(v)}
                   />
                   {Object.keys(STRATEGY_COLORS).map((s) => (

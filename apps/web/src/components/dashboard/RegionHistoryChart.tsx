@@ -221,7 +221,12 @@ export function RegionHistoryChart({
                   return [fmtValue(n, metric), String(name)];
                 }}
               />
-              <Legend wrapperStyle={{ fontSize: 11 }} />
+              <Legend
+                verticalAlign="top"
+                align="center"
+                height={28}
+                wrapperStyle={{ paddingBottom: 8, fontSize: 11 }}
+              />
               {activeCodes.map((code) => (
                 <Line
                   key={code}
