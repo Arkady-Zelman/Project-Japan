@@ -72,7 +72,7 @@ export function useRealtimeBacktest(backtestIds: string[]): {
     fetchAll().finally(() => setLoading(false));
 
     // Subscribe to changes on each id (we use a single channel with multiple filters).
-    const channel = supabase.channel(`backtests:${backtestIds.join(",")}`);
+    const channel = supabase.channel(`backtests:${backtestIds.join(",")}:${Math.random().toString(36).slice(2)}`);
     for (const id of backtestIds) {
       channel.on(
         "postgres_changes",

@@ -152,21 +152,33 @@ export function BacktestResults({ backtestIds }: Props) {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r) => (
-                  <tr key={r.id} className="border-b">
-                    <td className="py-2 pr-3 font-medium" style={{ color: STRATEGY_COLORS[r.strategy] }}>
-                      {STRATEGY_LABELS[r.strategy] ?? r.strategy}
-                    </td>
-                    <td className="py-2 pr-3">
-                      <StatusBadge status={r.status} />
-                    </td>
-                    <td className="py-2 pr-3 font-mono">{fmtJpy(r.realised_pnl_jpy)}</td>
-                    <td className="py-2 pr-3 font-mono text-muted-foreground">{fmtJpy(r.modelled_pnl_jpy)}</td>
-                    <td className="py-2 pr-3 font-mono text-orange-600">{fmtJpy(r.slippage_jpy)}</td>
-                    <td className="py-2 pr-3 font-mono">{fmtNum(r.sharpe)}</td>
-                    <td className="py-2 pr-3 font-mono text-red-700">{fmtJpy(r.max_drawdown_jpy)}</td>
-                  </tr>
-                ))}
+                {(() => {
+                  const leaderId = rows
+                    .filter((r) => r.status === "done" && r.realised_pnl_jpy != null)
+                    .sort((a, b) => (b.realised_pnl_jpy ?? 0) - (a.realised_pnl_jpy ?? 0))[0]?.id;
+                  return rows.map((r) => (
+                    <tr key={r.id} className="border-b">
+                      <td className="py-2 pr-3 font-medium" style={{ color: STRATEGY_COLORS[r.strategy] }}>
+                        <span className="inline-flex items-center gap-2">
+                          {STRATEGY_LABELS[r.strategy] ?? r.strategy}
+                          {leaderId === r.id && (
+                            <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+                              Leader
+                            </span>
+                          )}
+                        </span>
+                      </td>
+                      <td className="py-2 pr-3">
+                        <StatusBadge status={r.status} />
+                      </td>
+                      <td className="py-2 pr-3 font-mono">{fmtJpy(r.realised_pnl_jpy)}</td>
+                      <td className="py-2 pr-3 font-mono text-muted-foreground">{fmtJpy(r.modelled_pnl_jpy)}</td>
+                      <td className="py-2 pr-3 font-mono text-orange-600">{fmtJpy(r.slippage_jpy)}</td>
+                      <td className="py-2 pr-3 font-mono">{fmtNum(r.sharpe)}</td>
+                      <td className="py-2 pr-3 font-mono text-red-700">{fmtJpy(r.max_drawdown_jpy)}</td>
+                    </tr>
+                  ));
+                })()}
               </tbody>
             </table>
           </div>
@@ -185,16 +197,25 @@ export function BacktestResults({ backtestIds }: Props) {
           <CardContent>
             <div className="h-[300px]">
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={equityCurveData}>
+                <LineChart data={equityCurveData} margin={{ bottom: 56 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                   <XAxis
                     type="number"
                     dataKey="ts"
                     domain={["dataMin", "dataMax"]}
                     scale="time"
-                    tickFormatter={(t) =>
-                      new Date(t as number).toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" })
-                    }
+                    tick={{ fontSize: 10, fill: "#a3a3a3" }}
+                    angle={-90}
+                    textAnchor="end"
+                    height={56}
+                    tickFormatter={(t) => {
+                      const d = new Date(t as number);
+                      const mo = String(d.getMonth() + 1).padStart(2, "0");
+                      const dd = String(d.getDate()).padStart(2, "0");
+                      const hh = String(d.getHours()).padStart(2, "0");
+                      const mm = String(d.getMinutes()).padStart(2, "0");
+                      return `${mo}-${dd} ${hh}:${mm}`;
+                    }}
                   />
                   <YAxis
                     tickFormatter={(v) => fmtJpy(typeof v === "number" ? v : Number(v))}

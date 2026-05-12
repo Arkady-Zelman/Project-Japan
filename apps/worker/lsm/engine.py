@@ -293,25 +293,30 @@ def run_lsm(
     basis: str = "power",
     dt_days: float = 1.0,
     discount_rate: float = 0.0,
+    oos_paths: np.ndarray | None = None,
 ) -> ValuationResult:
     """Boogert-de Jong LSM valuation.
 
     Args:
       paths: (M, T+1) ndarray of prices in JPY/MWh (or EUR/MWh for the
-        gate test). Currency must match `degradation_jpy_mwh`.
+        gate test). Used for backward β fit. Currency must match
+        `degradation_jpy_mwh`.
       asset: AssetSpec.
       n_volume_grid: number of volume grid points. 101 ≈ paper default;
         51 is twice as fast with <0.5% deviation.
-      basis: "power" (1, S, S², S³) only for v1. `power_regime` and
-        `bspline` are M7.5 follow-ups.
+      basis: "power" (1, S, S², S³) only for v1. `bspline` is parked as
+        M10C L3 lever 2 (Carriere-Longstaff B-splines).
       dt_days: timestep length in days. 1.0 for paper, 1/48 for half-hour.
       discount_rate: continuous-compound discount rate δ; annual.
+      oos_paths: optional (M', T+1) ndarray. When provided, the backward
+        sweep fits β on `paths` while the forward sweep dispatches on
+        `oos_paths`. Eliminates in-sample bias (M10C L3 lever 1).
 
     Returns ValuationResult with all the headline numbers + per-slot
     summaries suitable for `valuation_decisions`.
     """
     if basis != "power":
-        raise NotImplementedError(f"basis='{basis}' is M7.5 territory; v1 supports only 'power'")
+        raise NotImplementedError(f"basis='{basis}' not yet supported; v1 ships 'power'")
 
     paths = np.ascontiguousarray(paths, dtype=np.float64)
     M, T_plus_1 = paths.shape
@@ -343,8 +348,9 @@ def run_lsm(
         max_charge_step, max_discharge_step, sqrt_eff, degradation,
         discount_per_step, n_basis,
     )
+    forward_paths = paths if oos_paths is None else np.ascontiguousarray(oos_paths, dtype=np.float64)
     soc_paths, action_paths, accumulated = _forward_sweep(
-        paths, betas, scales, volume_grid,
+        forward_paths, betas, scales, volume_grid,
         asset.soc_initial_mwh,
         max_charge_step, max_discharge_step, sqrt_eff, degradation,
         discount_per_step, n_basis,

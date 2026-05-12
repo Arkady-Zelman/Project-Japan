@@ -7,7 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-StrategyName = Literal["lsm", "intrinsic", "rolling_intrinsic", "naive_spread"]
+StrategyName = Literal["lsm", "intrinsic", "rolling_intrinsic", "naive_spread", "lsm_vlstm"]
 
 
 class BacktestRequest(BaseModel):

@@ -19,6 +19,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const AREAS = [
   { code: "TK", name: "Tokyo" },
@@ -154,32 +155,36 @@ export function RegimePanel() {
 
         <Separator />
 
-        {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
+        {loading && (
+          <div className="space-y-2">
+            <Skeleton className="h-4 w-32" />
+            <Skeleton className="h-[260px] w-full" />
+          </div>
+        )}
         {error && <p className="text-sm text-red-600">Error: {error}</p>}
         {data?.note && <p className="text-sm text-muted-foreground">{data.note}</p>}
 
         {chartData.length > 0 ? (
           <div className="h-[280px] w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartData} margin={{ top: 8, right: 24, bottom: 24, left: 56 }}>
+              <AreaChart data={chartData} margin={{ top: 8, right: 24, bottom: 72, left: 56 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                 <XAxis
                   type="number"
                   dataKey="ts"
                   domain={["dataMin", "dataMax"]}
                   scale="time"
+                  tick={{ fontSize: 10, fill: "#a3a3a3" }}
+                  angle={-90}
+                  textAnchor="end"
+                  height={64}
                   tickFormatter={(t) => {
                     const d = new Date(t as number);
-                    return d.toLocaleDateString("ja-JP", {
-                      month: "numeric",
-                      day: "numeric",
-                    });
-                  }}
-                  label={{
-                    value: "Slot start (JST)",
-                    position: "insideBottom",
-                    offset: -10,
-                    style: { textAnchor: "middle" },
+                    const mo = String(d.getMonth() + 1).padStart(2, "0");
+                    const dd = String(d.getDate()).padStart(2, "0");
+                    const hh = String(d.getHours()).padStart(2, "0");
+                    const mm = String(d.getMinutes()).padStart(2, "0");
+                    return `${mo}-${dd} ${hh}:${mm}`;
                   }}
                 />
                 <YAxis

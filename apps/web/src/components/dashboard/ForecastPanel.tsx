@@ -21,6 +21,9 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
+import { captureEvent } from "@/lib/posthog";
+import { useRealtimeForecast } from "@/hooks/useRealtimeForecast";
 
 const AREAS = [
   { code: "TK", name: "Tokyo" },
@@ -71,6 +74,9 @@ export function ForecastPanel() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  // Refetch when a new forecast_run lands for this area (M10C L8).
+  const realtimeTick = useRealtimeForecast(area);
+
   useEffect(() => {
     setLoading(true);
     setError(null);
@@ -85,10 +91,13 @@ export function ForecastPanel() {
         if (!r.ok) throw new Error(j?.error?.toString() ?? r.statusText);
         return j as ForecastResponse;
       })
-      .then((d) => setData(d))
+      .then((d) => {
+        setData(d);
+        captureEvent("forecast_viewed", { area, with_stack: withStack, with_regime: withRegime });
+      })
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
-  }, [area, withStack, withRegime]);
+  }, [area, withStack, withRegime, realtimeTick]);
 
   const chartData = useMemo(() => {
     if (!data?.slots) return [];
@@ -190,7 +199,12 @@ export function ForecastPanel() {
 
         <Separator />
 
-        {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
+        {loading && (
+          <div className="space-y-2">
+            <Skeleton className="h-4 w-48" />
+            <Skeleton className="h-[320px] w-full" />
+          </div>
+        )}
         {error && <p className="text-sm text-red-600">Error: {error}</p>}
         {data?.note && <p className="text-sm text-muted-foreground">{data.note}</p>}
 
@@ -205,25 +219,22 @@ export function ForecastPanel() {
         {chartData.length > 0 ? (
           <div className="h-[320px] w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={chartData} margin={{ top: 8, right: 24, bottom: 24, left: 56 }}>
+              <ComposedChart data={chartData} margin={{ top: 8, right: 24, bottom: 72, left: 56 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                 <XAxis
                   type="number"
                   dataKey="ts"
                   domain={["dataMin", "dataMax"]}
                   scale="time"
+                  tick={{ fontSize: 10, fill: "#a3a3a3" }}
+                  angle={-90}
+                  textAnchor="end"
+                  height={64}
                   tickFormatter={(t) => {
                     const d = new Date(t as number);
-                    return d.toLocaleTimeString("ja-JP", {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    });
-                  }}
-                  label={{
-                    value: "Slot start (JST)",
-                    position: "insideBottom",
-                    offset: -10,
-                    style: { textAnchor: "middle" },
+                    const hh = String(d.getHours()).padStart(2, "0");
+                    const mm = String(d.getMinutes()).padStart(2, "0");
+                    return `${hh}:${mm}`;
                   }}
                 />
                 <YAxis

@@ -254,19 +254,71 @@ def stack_backfill(
 
 # 18:00 UTC Sun = 03:00 JST Mon. Per spec §7.4 the MRS recalibrates weekly.
 # After ingest_daily + stack_run_daily have populated the previous week's
-# residuals.
-_REGIME_WEEKLY_CRON = modal.Cron("0 18 * * 0")
+# residuals. This single cron bundles all four weekly model jobs to stay
+# inside Modal's 5-cron free-tier cap — each step still emits its own
+# compute_run row so the dashboard sees them individually.
+_MODELS_WEEKLY_CRON = modal.Cron("0 18 * * 0")
 
 
 @app.function(image=base_image, cpu=4.0, timeout=3600,
-              schedule=_REGIME_WEEKLY_CRON, secrets=_secrets)
-def regime_calibrate_weekly() -> dict:
-    """Re-fit the 3-regime MRS for every area and refresh `regime_states`.
+              schedule=_MODELS_WEEKLY_CRON, secrets=_secrets)
+def models_weekly() -> dict:
+    """Weekly bundle: MRS calibrate → MRS infer → MRS validate → VLSTM train.
 
-    Calibration writes both the new `models` row (status='ready', previous
-    `mrs_<area>` rows demoted to 'deprecated') and the per-slot regime
-    posteriors in one atomic transaction — see `regime/mrs_calibrate.py`.
+    Each step wraps in its own `compute_run(...)` so the dashboard shows
+    one green dot per kind per week. Failures in early steps don't block
+    later ones — the bundle keeps going and reports per-step status.
+
+    The VLSTM step delegates to `train_vlstm_weekly.remote()` so the GPU
+    L4 only spins up for the training portion — the regime jobs run on
+    this CPU container.
     """
+    from common.sentry import init_sentry
+
+    init_sentry()
+
+    today = datetime.now(tz=UTC).date()
+    tomorrow = today + timedelta(days=1)
+    out: dict[str, dict | str] = {}
+
+    # 1) Regime MRS calibration (emits regime_calibrate).
+    try:
+        from regime.mrs_calibrate import run_all as mrs_calibrate_run_all
+        out["regime_calibrate"] = mrs_calibrate_run_all(date(2023, 1, 1), tomorrow)
+    except Exception as e:  # noqa: BLE001
+        out["regime_calibrate"] = {"error": str(e)}
+
+    # 2) Regime state inference (emits regime_infer).
+    try:
+        from regime.infer_state import run_all as infer_run_all
+        # Infer for the most-recent month so the dashboard always has fresh
+        # posteriors without re-inferring all of history every week.
+        infer_start = today - timedelta(days=35)
+        out["regime_infer"] = infer_run_all(infer_start, tomorrow)
+    except Exception as e:  # noqa: BLE001
+        out["regime_infer"] = {"error": str(e)}
+
+    # 3) Regime gate validation (emits regime_validate).
+    try:
+        from regime.validate import evaluate as regime_evaluate
+        # Same recent-month window as inference — the gate replays it.
+        out["regime_validate"] = regime_evaluate(today - timedelta(days=35), tomorrow)
+    except Exception as e:  # noqa: BLE001
+        out["regime_validate"] = {"error": str(e)}
+
+    # 4) VLSTM weekly retrain on GPU L4 (emits vlstm_train).
+    try:
+        out["vlstm_train"] = train_vlstm_weekly.remote()
+    except Exception as e:  # noqa: BLE001
+        out["vlstm_train"] = {"error": str(e)}
+
+    return out
+
+
+# Kept for one-off operator runs / backfills.
+@app.function(image=base_image, cpu=4.0, timeout=3600, secrets=_secrets)
+def regime_calibrate_weekly() -> dict:
+    """On-demand MRS calibration only (no infer/validate/vlstm). Pre-bundle behavior."""
     from common.sentry import init_sentry
     from regime.mrs_calibrate import run_all
 

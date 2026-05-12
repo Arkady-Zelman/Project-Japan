@@ -9,12 +9,14 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { captureEvent } from "@/lib/posthog";
 
 const STRATEGIES = [
   { id: "naive_spread", label: "Naive spread" },
   { id: "intrinsic", label: "Intrinsic (perfect foresight)" },
   { id: "rolling_intrinsic", label: "Rolling intrinsic (24h lookahead)" },
   { id: "lsm", label: "LSM (M4 stack-driven)" },
+  { id: "lsm_vlstm", label: "LSM (VLSTM-driven)" },
 ] as const;
 type StrategyId = (typeof STRATEGIES)[number]["id"];
 
@@ -82,6 +84,12 @@ export function BacktestForm({ assets, onBacktestsQueued }: Props) {
         throw new Error(j?.error ? JSON.stringify(j.error) : r.statusText);
       }
       const ids = (j.backtest_ids as { id: string; strategy: string }[]).map((row) => row.id);
+      captureEvent("backtest_queued", {
+        asset_id: assetId,
+        strategies: Array.from(strategies),
+        window_start: windowStart,
+        window_end: windowEnd,
+      });
       onBacktestsQueued(ids);
     } catch (e) {
       setError(String(e));
@@ -158,7 +166,13 @@ export function BacktestForm({ assets, onBacktestsQueued }: Props) {
                   ))}
                 </div>
               </div>
-              <div>
+            </div>
+
+            <details className="rounded-md border border-foreground/10 px-3 py-2">
+              <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+                Advanced
+              </summary>
+              <div className="mt-3">
                 <label className="mb-1 block text-xs font-medium text-muted-foreground">
                   Slippage spread (¥/kWh, round-trip)
                 </label>
@@ -169,9 +183,12 @@ export function BacktestForm({ assets, onBacktestsQueued }: Props) {
                   onChange={(e) => setSpreadKwh(Number(e.target.value))}
                 />
               </div>
-            </div>
+            </details>
 
-            <div className="flex items-center gap-3">
+            <div className="rounded-md border border-dashed border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 md:hidden dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
+              Read-only on mobile. Switch to desktop to run a backtest.
+            </div>
+            <div className="hidden items-center gap-3 md:flex">
               <button
                 type="submit"
                 disabled={submitting || strategies.size === 0}

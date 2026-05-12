@@ -111,7 +111,7 @@ export async function GET(request: Request) {
   const slotStarts = Array.from(bySlot.keys()).sort();
 
   // Optional joins.
-  let stackBySlot = new Map<string, number>();
+  const stackBySlot = new Map<string, number>();
   if (withStack && slotStarts.length > 0) {
     const { data: stackRows } = await supabase
       .from("stack_clearing_prices")
@@ -125,7 +125,7 @@ export async function GET(request: Request) {
       );
     }
   }
-  let regimeBySlot = new Map<string, "base" | "spike" | "drop">();
+  const regimeBySlot = new Map<string, "base" | "spike" | "drop">();
   if (withRegime && slotStarts.length > 0) {
     const { data: modelRow } = await supabase
       .from("models")

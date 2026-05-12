@@ -31,6 +31,7 @@ def simulate_schwartz_paths(
     *,
     dt_days: float = 1.0,
     seed: int | None = None,
+    antithetic: bool = False,
 ) -> np.ndarray:
     """Simulate `n_paths` Schwartz 1-factor paths over `T_days` calendar days.
 
@@ -42,6 +43,10 @@ def simulate_schwartz_paths(
     Each row begins at `S0` and evolves under the Schwartz mean-reverting
     log-process. Setting `seed` fixes the RNG for reproducibility (the gate
     test uses seed=42).
+
+    Antithetic-variates mode (M10C L3) pairs each base path with its
+    sign-flipped twin to halve variance for free. `n_paths` must be even
+    when `antithetic=True`.
     """
     rng = np.random.default_rng(seed)
     n_steps = int(round(T_days / dt_days))
@@ -50,8 +55,17 @@ def simulate_schwartz_paths(
     log_S = np.full((n_paths, n_steps + 1), log_mu, dtype=np.float64)
     sqrt_dt = np.sqrt(dt_days)
 
+    if antithetic:
+        if n_paths % 2 != 0:
+            raise ValueError("antithetic mode requires even n_paths")
+        half = n_paths // 2
+
     for t in range(n_steps):
-        eps = rng.standard_normal(n_paths)
+        if antithetic:
+            eps_half = rng.standard_normal(half)
+            eps = np.concatenate([eps_half, -eps_half])
+        else:
+            eps = rng.standard_normal(n_paths)
         log_S[:, t + 1] = (
             log_S[:, t]
             + kappa * (log_mu - log_S[:, t]) * dt_days

@@ -121,21 +121,15 @@ export function ValuationResults({ valuationId }: Props) {
   if (!v) return null;
 
   const status = v.status;
-  const statusColour =
-    status === "done" ? "text-emerald-700"
-      : status === "failed" ? "text-red-600"
-      : status === "running" ? "text-blue-700" : "text-muted-foreground";
 
   return (
     <div className="space-y-4">
       {/* Headline numbers + donut */}
       <Card>
         <CardHeader>
-          <CardTitle>
-            Valuation result{" "}
-            <span className={`ml-2 text-sm font-medium ${statusColour}`}>
-              [{status}]
-            </span>
+          <CardTitle className="flex items-center gap-2">
+            <span>Valuation result</span>
+            <StatusBadge status={status} />
           </CardTitle>
           <CardDescription>
             <span className="font-mono">{valuationId.slice(0, 8)}</span> ·{" "}
@@ -242,6 +236,10 @@ export function ValuationResults({ valuationId }: Props) {
                     dataKey="ts"
                     domain={["dataMin", "dataMax"]}
                     scale="time"
+                    tick={{ fontSize: 10, fill: "#a3a3a3" }}
+                    angle={-90}
+                    textAnchor="end"
+                    height={56}
                     tickFormatter={(t) => fmtTs(new Date(t as number).toISOString())}
                   />
                   <YAxis
@@ -299,6 +297,10 @@ export function ValuationResults({ valuationId }: Props) {
                     dataKey="ts"
                     domain={["dataMin", "dataMax"]}
                     scale="time"
+                    tick={{ fontSize: 10, fill: "#a3a3a3" }}
+                    angle={-90}
+                    textAnchor="end"
+                    height={56}
                     tickFormatter={(t) => fmtTs(new Date(t as number).toISOString())}
                   />
                   <YAxis
@@ -344,6 +346,10 @@ export function ValuationResults({ valuationId }: Props) {
                     dataKey="ts"
                     domain={["dataMin", "dataMax"]}
                     scale="time"
+                    tick={{ fontSize: 10, fill: "#a3a3a3" }}
+                    angle={-90}
+                    textAnchor="end"
+                    height={56}
                     tickFormatter={(t) => fmtTs(new Date(t as number).toISOString())}
                   />
                   <YAxis
@@ -365,5 +371,18 @@ export function ValuationResults({ valuationId }: Props) {
         </Card>
       )}
     </div>
+  );
+}
+
+function StatusBadge({ status }: { status: "queued" | "running" | "done" | "failed" }) {
+  const tone =
+    status === "done" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+      : status === "failed" ? "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300"
+      : status === "running" ? "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
+      : "bg-muted text-muted-foreground";
+  return (
+    <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${tone}`}>
+      {status}
+    </span>
   );
 }

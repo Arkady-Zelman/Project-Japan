@@ -92,7 +92,7 @@ export function useRealtimeValuation(valuation_id: string | null): {
 
     // Realtime subscription on the valuations row.
     const channel = supabase
-      .channel(`valuation:${valuation_id}`)
+      .channel(`valuation:${valuation_id}:${Math.random().toString(36).slice(2)}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "valuations", filter: `id=eq.${valuation_id}` },

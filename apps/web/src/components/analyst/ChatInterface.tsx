@@ -51,7 +51,7 @@ export function ChatInterface({
         <div ref={scrollRef} className="flex-1 overflow-y-auto space-y-3">
           {messages.length === 0 && !pending && (
             <p className="text-sm text-muted-foreground">
-              Try: <em>"What was Tokyo&apos;s average peak price (17:00–20:00) in August 2025?"</em>
+              Try: <em>&ldquo;What was Tokyo&apos;s average peak price (17:00&ndash;20:00) in August 2025?&rdquo;</em>
             </p>
           )}
           {messages.map((m) => (

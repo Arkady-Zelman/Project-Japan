@@ -230,9 +230,20 @@ def run_backtest(
             strategy = NaiveSpreadStrategy(naive_buy, naive_sell)
         else:
             strategy = get_strategy(strategy_name)
-        soc_mwh, actions_mwh = strategy.dispatch(
-            asset, realised_kwh, stack_prices_jpy_kwh=stack_kwh,
-        )
+        if strategy_name == "lsm_vlstm":
+            from .vlstm_paths import load_vlstm_paths_per_origin
+            vlstm_paths = load_vlstm_paths_per_origin(
+                area_id, slot_starts, lookahead_slots=48, roll_interval_slots=24,
+            )
+            soc_mwh, actions_mwh = strategy.dispatch(  # type: ignore[call-arg]
+                asset, realised_kwh,
+                stack_prices_jpy_kwh=stack_kwh,
+                vlstm_paths_per_origin=vlstm_paths,
+            )
+        else:
+            soc_mwh, actions_mwh = strategy.dispatch(
+                asset, realised_kwh, stack_prices_jpy_kwh=stack_kwh,
+            )
         # Align lengths (some strategies may pad differently).
         actions_mwh = actions_mwh[:n_slots]
         soc_mwh = soc_mwh[: n_slots + 1]

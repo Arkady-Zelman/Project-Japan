@@ -78,20 +78,26 @@ class JEPXForecaster(L.LightningModule):
     which area it belongs to.
     """
 
-    def __init__(self, lr: float = 1e-3) -> None:
+    def __init__(
+        self,
+        lr: float = 1e-3,
+        hidden_dim: int = LSTM_HIDDEN,
+        dropout_p: float = DROPOUT_P,
+        lr_schedule: str = "plateau",
+    ) -> None:
         super().__init__()
         self.save_hyperparameters()
         self.input_proj = nn.Linear(N_FEATURES_PER_SLOT, INPUT_PROJ_DIM)
         self.area_embedding = nn.Embedding(N_AREAS, AREA_EMB_DIM)
         self.lstm = nn.LSTM(
             input_size=INPUT_PROJ_DIM + AREA_EMB_DIM,
-            hidden_size=LSTM_HIDDEN,
+            hidden_size=hidden_dim,
             num_layers=LSTM_LAYERS,
-            dropout=DROPOUT_P,         # between layers
+            dropout=dropout_p,
             batch_first=True,
         )
-        self.mc_dropout = MCDropout(p=DROPOUT_P)
-        self.head = nn.Linear(LSTM_HIDDEN, HORIZON_SLOTS)
+        self.mc_dropout = MCDropout(p=dropout_p)
+        self.head = nn.Linear(hidden_dim, HORIZON_SLOTS)
 
     def forward(self, x: torch.Tensor, area_ix: torch.Tensor) -> torch.Tensor:
         B, T, _ = x.shape
@@ -131,6 +137,14 @@ class JEPXForecaster(L.LightningModule):
 
     def configure_optimizers(self):
         opt = torch.optim.Adam(self.parameters(), lr=self.hparams.lr)
+        schedule = getattr(self.hparams, "lr_schedule", "plateau")
+        if schedule == "cosine":
+            # Cosine schedule needs trainer.max_epochs at construction time;
+            # default to 30 if Lightning doesn't expose it yet.
+            t_max = getattr(self.trainer, "max_epochs", None) or 30
+            sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=t_max)
+            return {"optimizer": opt, "lr_scheduler": {"scheduler": sched, "interval": "epoch"}}
+        # default: plateau
         sched = torch.optim.lr_scheduler.ReduceLROnPlateau(
             opt, mode="min", factor=0.5, patience=3,
         )

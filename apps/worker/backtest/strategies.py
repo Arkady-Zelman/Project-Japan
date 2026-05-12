@@ -299,6 +299,74 @@ class LSMStackStrategy:
 
 
 # ---------------------------------------------------------------------------
+# 5. LSMVLSTMStrategy (M10C L5 — rolling LSM with VLSTM forecast paths)
+# ---------------------------------------------------------------------------
+
+
+class LSMVLSTMStrategy:
+    """Rolling LSM using VLSTM forecast_paths as the per-origin forecast.
+
+    Aux input `vlstm_paths_per_origin` is a list of (P, H+1) ndarrays in
+    JPY/kWh, one per roll origin. Falls back to stack-driven LSM when the
+    list element at a given origin is None or empty.
+    """
+
+    name = "lsm_vlstm"
+
+    def dispatch(
+        self,
+        asset: AssetSpec,
+        realised_prices_jpy_kwh: np.ndarray,
+        *,
+        stack_prices_jpy_kwh: np.ndarray | None = None,
+        vlstm_paths_per_origin: list[np.ndarray | None] | None = None,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        if vlstm_paths_per_origin is None:
+            raise ValueError("LSMVLSTMStrategy requires vlstm_paths_per_origin")
+        realised_jpy_mwh = np.asarray(realised_prices_jpy_kwh, dtype=np.float64) * KWH_PER_MWH
+        stack_jpy_mwh = (
+            np.asarray(stack_prices_jpy_kwh, dtype=np.float64) * KWH_PER_MWH
+            if stack_prices_jpy_kwh is not None
+            else None
+        )
+        T = realised_jpy_mwh.shape[0]
+        H = min(DEFAULT_LOOKAHEAD_SLOTS, T)
+        origin_indices = list(range(0, T - H + 1, DEFAULT_ROLL_INTERVAL_SLOTS))
+        forecasts: list[np.ndarray] = []
+        for i, origin in enumerate(origin_indices):
+            vp = vlstm_paths_per_origin[i] if i < len(vlstm_paths_per_origin) else None
+            if vp is not None and vp.shape[0] > 0:
+                # Use the path-mean across the P sampled paths as the forecast
+                # curve; matches the LSMStack contract of a single forecast
+                # series per origin. Shape (1, H+1) in JPY/MWh.
+                mean_curve = vp.mean(axis=0) * KWH_PER_MWH
+                if mean_curve.shape[0] >= H + 1:
+                    forecasts.append(mean_curve[: H + 1].reshape(1, -1))
+                    continue
+                pad_value = mean_curve[-1] if mean_curve.shape[0] else realised_jpy_mwh[origin]
+                pad = np.full(H + 1 - mean_curve.shape[0], pad_value)
+                forecasts.append(np.concatenate([mean_curve, pad]).reshape(1, -1))
+                continue
+            # Fall back to stack model.
+            if stack_jpy_mwh is None:
+                forecasts.append(realised_jpy_mwh[origin: origin + H + 1].reshape(1, -1))
+                continue
+            window = stack_jpy_mwh[origin: origin + H + 1]
+            if window.shape[0] < H + 1:
+                pad_value = window[-1] if len(window) > 0 else realised_jpy_mwh[origin]
+                pad = np.full(H + 1 - window.shape[0], pad_value)
+                window = np.concatenate([window, pad])
+            forecasts.append(window.reshape(1, -1))
+        return _roll_horizon_lsm(
+            asset=asset,
+            forecast_paths_per_origin=forecasts,
+            realised_prices_jpy_mwh=realised_jpy_mwh,
+            origin_indices=origin_indices,
+            initial_soc_mwh=asset.soc_initial_mwh,
+        )
+
+
+# ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
 
@@ -308,6 +376,7 @@ STRATEGY_REGISTRY: dict[str, type[Strategy]] = {
     "intrinsic": IntrinsicStrategy,
     "rolling_intrinsic": RollingIntrinsicStrategy,
     "lsm": LSMStackStrategy,
+    "lsm_vlstm": LSMVLSTMStrategy,
 }
 
 

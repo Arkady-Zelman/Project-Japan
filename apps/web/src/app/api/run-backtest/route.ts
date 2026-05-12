@@ -5,42 +5,41 @@
  *
  * Flow:
  *   1. zod-validate body.
- *   2. Verify the asset exists and belongs to the dev user.
+ *   2. Verify the asset exists and belongs to the authenticated user.
  *   3. Verify the window has data (>= 48 half-hour slots in jepx_spot_prices).
  *   4. INSERT one `backtests` row per requested strategy with status='queued'.
  *   5. Fire-and-forget POST to MODAL_BACKTEST_ENDPOINT for each backtest_id.
  *   6. Return 202 with `{ backtest_ids }`.
  *
- * Auth: hardcoded dev user (JEPX_DEV_USER_ID env).
+ * Auth: Supabase session via cookie. 401 if anonymous (middleware also blocks).
  */
 
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { createServerClient } from "@/lib/supabase/server";
+import { createServerClient, createSessionClient } from "@/lib/supabase/server";
 
 const MODAL_BACKTEST_ENDPOINT = process.env.MODAL_BACKTEST_ENDPOINT;
-const DEV_USER_ID = process.env.JEPX_DEV_USER_ID;
 
 const requestSchema = z.object({
   asset_id: z.string().uuid(),
   window_start: z.string().date(),
   window_end: z.string().date(),
   strategies: z
-    .array(z.enum(["lsm", "intrinsic", "rolling_intrinsic", "naive_spread"]))
+    .array(z.enum(["lsm", "intrinsic", "rolling_intrinsic", "naive_spread", "lsm_vlstm"]))
     .min(1)
-    .max(4),
+    .max(5),
   spread_jpy_kwh: z.number().nonnegative().default(2.0),
   naive_buy_threshold_jpy_kwh: z.number().nonnegative().optional(),
   naive_sell_threshold_jpy_kwh: z.number().nonnegative().optional(),
 });
 
 export async function POST(request: Request) {
-  if (!DEV_USER_ID) {
-    return NextResponse.json(
-      { error: "JEPX_DEV_USER_ID env var not set." },
-      { status: 500 },
-    );
+  const session = createSessionClient();
+  const { data: userData } = await session.auth.getUser();
+  const userId = userData.user?.id;
+  if (!userId) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   let body: unknown;
   try {
@@ -76,7 +75,7 @@ export async function POST(request: Request) {
   if (!asset) {
     return NextResponse.json({ error: `asset ${asset_id} not found` }, { status: 404 });
   }
-  if (asset.user_id !== DEV_USER_ID) {
+  if (asset.user_id !== userId) {
     return NextResponse.json({ error: "asset belongs to another user" }, { status: 403 });
   }
 
@@ -98,7 +97,7 @@ export async function POST(request: Request) {
   // Insert one backtests row per strategy.
   const rows = strategies.map((s) => ({
     asset_id,
-    user_id: DEV_USER_ID,
+    user_id: userId,
     strategy: s,
     window_start,
     window_end,

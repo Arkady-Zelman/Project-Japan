@@ -57,6 +57,10 @@ class UtilitySource(BaseModel):
     name: str
     annual_url_pattern: str | None = None
     monthly_url_pattern: str | None = None
+    # Per-day fallback for utilities (currently TH) whose monthly publication
+    # lags by 1-2 months but who do publish daily realtime CSVs. Format
+    # placeholders: `{yyyy}{mm:02d}{dd:02d}`.
+    daily_url_pattern: str | None = None
     encoding: str = "cp932"
     implemented: bool = False
 
@@ -89,6 +93,10 @@ AREA_SOURCES: dict[str, UtilitySource] = {
             "https://setsuden.nw.tohoku-epco.co.jp/common/demand/"
             "eria_jukyu_{yyyy}{mm:02d}_02.csv"
         ),
+        daily_url_pattern=(
+            "https://setsuden.nw.tohoku-epco.co.jp/common/demand/realtime_jukyu/"
+            "realtime_jukyu_{yyyy}{mm:02d}{dd:02d}_02.csv"
+        ),
         encoding="cp932",
         implemented=True,
     ),
@@ -112,11 +120,55 @@ AREA_SOURCES: dict[str, UtilitySource] = {
         encoding="cp932",
         implemented=True,
     ),
-    # 4 utilities deferred — see module docstring + BUILD_SPEC §7.1.1.
-    "CB": UtilitySource(area_code="CB", name="Chubu PG"),
-    "KS": UtilitySource(area_code="KS", name="Kansai-TD"),
-    "CG": UtilitySource(area_code="CG", name="Chugoku NW"),
-    "KY": UtilitySource(area_code="KY", name="Kyushu NW"),
+    # M10C L4: 4 deferred utilities now wired with verified URLs. Each URL
+    # was confirmed by inspecting the utility's frontend JavaScript and
+    # fetching a sample monthly CSV. Column counts dispatch to V1 (20-col)
+    # or V2 (22-col) format automatically via `_pick_monthly_fmt`.
+    #
+    # CB: served by a PHP proxy. Format V2 (22 cols).
+    # KS: filename-listed in `interchange/.../filelist.json`. Format V1 (20 cols).
+    # CG: filename built in `js/script_eriajukyu_1.js`. Format V2 (22 cols).
+    # KY: direct csv path under td_area_jukyu/. Format V1 (20 cols).
+    "CB": UtilitySource(
+        area_code="CB",
+        name="Chubu PG",
+        monthly_url_pattern=(
+            "https://powergrid.chuden.co.jp/denkiyoho/resource/php/getCsv.php"
+            "?file=eria_jukyu_{yyyy}{mm:02d}_04.csv"
+        ),
+        encoding="cp932",
+        implemented=True,
+    ),
+    "KS": UtilitySource(
+        area_code="KS",
+        name="Kansai-TD",
+        monthly_url_pattern=(
+            "https://www.kansai-td.co.jp/interchange/denkiyoho/area-performance/"
+            "eria_jukyu_{yyyy}{mm:02d}_06.csv"
+        ),
+        encoding="cp932",
+        implemented=True,
+    ),
+    "CG": UtilitySource(
+        area_code="CG",
+        name="Chugoku NW",
+        monthly_url_pattern=(
+            "https://www.energia.co.jp/nw/jukyuu/sys/"
+            "eria_jukyu_{yyyy}{mm:02d}_07.csv"
+        ),
+        encoding="cp932",
+        implemented=True,
+    ),
+    "KY": UtilitySource(
+        area_code="KY",
+        name="Kyushu NW",
+        monthly_url_pattern=(
+            "https://www.kyuden.co.jp/td_area_jukyu/csv/"
+            "eria_jukyu_{yyyy}{mm:02d}_09.csv"
+        ),
+        encoding="cp932",
+        implemented=True,
+    ),
 }
 
 
@@ -457,6 +509,47 @@ def fetch_for_area(
                 continue
             rows.extend(_parse_rows(df, src, fmt, start, end))
             covered_months.add((yyyy, mm))
+
+    # 1b) Daily per-day fallback — only used when monthly didn't cover the
+    # month (e.g. Tohoku's monthly publication lags fiscal-year-end). One
+    # request per JST day in the window; tolerate 404s for days that haven't
+    # been published yet.
+    if src.daily_url_pattern:
+        requested_months_before_daily = set(_months_between(start, end))
+        missing_months_for_daily = requested_months_before_daily - covered_months
+        if missing_months_for_daily:
+            day = start
+            while day < end:
+                month_key = (day.year, day.month)
+                if month_key not in missing_months_for_daily:
+                    day += timedelta(days=1)
+                    continue
+                url = src.daily_url_pattern.format(
+                    yyyy=day.year, mm=day.month, dd=day.day,
+                )
+                try:
+                    text = _fetch_text_cached(url, src.encoding)
+                    probe = pd.read_csv(io.StringIO(text), skiprows=2, header=None, nrows=1)
+                    fmt = _pick_monthly_fmt(probe.shape[1])
+                    if fmt is None:
+                        errors.append(
+                            f"{area_code} {day.isoformat()} daily: unrecognized "
+                            f"column count {probe.shape[1]} at {url}"
+                        )
+                        day += timedelta(days=1)
+                        continue
+                    df = _read_csv_with_format(text, fmt, source_url=url)
+                except httpx.HTTPStatusError as e:
+                    if e.response.status_code != 404:
+                        errors.append(f"{area_code} {day.isoformat()} daily: {e!r}")
+                    day += timedelta(days=1)
+                    continue
+                except Exception as e:
+                    errors.append(f"{area_code} {day.isoformat()} daily: {e!r}")
+                    day += timedelta(days=1)
+                    continue
+                rows.extend(_parse_rows(df, src, fmt, day, day + timedelta(days=1)))
+                day += timedelta(days=1)
 
     # 2) Annual per-fiscal-year, only for months not yet covered.
     if src.annual_url_pattern:

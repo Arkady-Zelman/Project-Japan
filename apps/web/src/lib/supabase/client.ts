@@ -1,18 +1,19 @@
 /**
- * Browser-side Supabase client.
+ * Browser-side Supabase client, session-aware via `@supabase/ssr`.
  *
- * Uses the publishable / anon key and respects RLS. Currently used by the
- * dashboard's Realtime subscription on `compute_runs` to live-update the
- * ingest-status table without a page reload.
+ * Reads the auth cookie set by the server during the magic-link callback, so
+ * Realtime channels and RLS-bound queries authenticate as the signed-in user.
+ * Anonymous users still get an anon-key client (Realtime channels on public
+ * tables, like compute_runs, still work).
  */
 
 "use client";
 
-import { createClient } from "@supabase/supabase-js";
+import { createBrowserClient as createBrowserClientSSR } from "@supabase/ssr";
 
 import type { Database } from "@jepx/shared-types";
 
-let _client: ReturnType<typeof createClient<Database>> | null = null;
+let _client: ReturnType<typeof createBrowserClientSSR<Database>> | null = null;
 
 export function createBrowserClient() {
   if (_client) return _client;
@@ -23,8 +24,6 @@ export function createBrowserClient() {
       "NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY must be set."
     );
   }
-  _client = createClient<Database>(url, anonKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
+  _client = createBrowserClientSSR<Database>(url, anonKey);
   return _client;
 }

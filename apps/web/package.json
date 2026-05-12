@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",
+    "@sentry/nextjs": "^10.52.0",
     "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.105.1",
     "class-variance-authority": "^0.7.1",
@@ -20,6 +21,7 @@
     "lucide-react": "^1.14.0",
     "next": "14.2.35",
     "plotly.js-basic-dist": "^2.35.3",
+    "posthog-js": "^1.373.2",
     "react": "^18",
     "react-dom": "^18",
     "react-plotly.js": "^2.6.0",
@@ -30,15 +32,19 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@types/d3-geo": "^3.1.0",
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "@types/react-plotly.js": "^2.6.4",
+    "@types/topojson-client": "^3.1.5",
+    "d3-geo": "^1.12.1",
     "eslint": "^8",
     "eslint-config-next": "14.2.35",
     "postcss": "^8",
     "tailwindcss": "^3.4.1",
     "tailwindcss-animate": "^1.0.7",
+    "topojson-client": "^3.1.0",
     "typescript": "^5"
   }
 }

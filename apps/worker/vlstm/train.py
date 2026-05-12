@@ -195,6 +195,11 @@ def train(
     val_days: int = 7,
     batch_size: int = 256,
     area_codes: tuple[AreaCode, ...] | None = None,
+    hidden_dim: int = 128,
+    dropout_p: float = 0.3,
+    lr: float = 1e-3,
+    lr_schedule: str = "plateau",
+    upload_storage: bool = False,
 ) -> dict:
     """Run the full M6 training + gate evaluation pipeline."""
     if area_codes is None:
@@ -245,7 +250,9 @@ def train(
         )
 
         # ---------- 2. Train ------------------------------------------
-        model = JEPXForecaster()
+        model = JEPXForecaster(
+            lr=lr, hidden_dim=hidden_dim, dropout_p=dropout_p, lr_schedule=lr_schedule,
+        )
         callbacks: list = []
         if val_loader is not None:
             callbacks.append(EarlyStopping(monitor="val_loss", patience=5, mode="min"))
@@ -311,6 +318,23 @@ def train(
             weights_path=weights_path,
         )
 
+        # Optional Supabase Storage upload (M10C L2).
+        storage_path: str | None = None
+        if upload_storage:
+            from .storage import upload_weights_to_storage
+            try:
+                storage_path = upload_weights_to_storage(model_id, weights_path)
+                logger.info("uploaded weights to Storage at %s", storage_path)
+                # Rewrite artifact_url so forecast.py knows to pull from Storage.
+                with connect() as conn, conn.cursor() as cur:
+                    cur.execute(
+                        "update models set artifact_url=%s where id=%s",
+                        (f"supabase://models/{storage_path}", model_id),
+                    )
+                    conn.commit()
+            except Exception as e:
+                logger.warning("Storage upload failed: %s", e)
+
         result = {
             "model_id": model_id,
             "status": "ready" if gate_pass else "deprecated",
@@ -333,6 +357,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--val-days", type=int, default=7)
     p.add_argument("--batch", type=int, default=256)
     p.add_argument("--areas", help="comma-separated AreaCodes; default all 9")
+    p.add_argument("--hidden-dim", type=int, default=128, help="LSTM hidden size")
+    p.add_argument("--dropout", type=float, default=0.3, help="Dropout probability")
+    p.add_argument("--lr", type=float, default=1e-3, help="Initial learning rate")
+    p.add_argument("--lr-schedule", choices=["plateau", "cosine"], default="plateau")
+    p.add_argument("--upload-storage", action="store_true",
+                   help="Upload weights.pt to Supabase Storage after training")
     args = p.parse_args(argv)
 
     if args.gate_end is None:
@@ -352,6 +382,8 @@ def main(argv: list[str] | None = None) -> int:
         gate_start=args.gate_start, gate_end=args.gate_end,
         n_epochs=args.epochs, stride=args.stride, val_days=args.val_days,
         batch_size=args.batch, area_codes=area_codes,
+        hidden_dim=args.hidden_dim, dropout_p=args.dropout, lr=args.lr,
+        lr_schedule=args.lr_schedule, upload_storage=args.upload_storage,
     )
     print(json.dumps(out, indent=2, default=str))
     return 0

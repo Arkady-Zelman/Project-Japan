@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   Card,
@@ -9,6 +9,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { captureEvent } from "@/lib/posthog";
 
 const AREAS = [
   { code: "TK", name: "Tokyo" },
@@ -60,12 +61,23 @@ const DEFAULTS: AssetFormState = {
 
 type Props = {
   onValuationQueued: (valuation_id: string) => void;
+  existingAsset?: (AssetFormState & { id: string }) | null;
+  onClearExisting?: () => void;
 };
 
-export function AssetForm({ onValuationQueued }: Props) {
-  const [state, setState] = useState<AssetFormState>(DEFAULTS);
+export function AssetForm({ onValuationQueued, existingAsset, onClearExisting }: Props) {
+  const [state, setState] = useState<AssetFormState>(existingAsset ?? DEFAULTS);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Hydrate form state when the parent selects an existing asset.
+  useEffect(() => {
+    if (existingAsset) {
+      const { id: _id, ...rest } = existingAsset;
+      void _id;
+      setState(rest);
+    }
+  }, [existingAsset]);
 
   const update = <K extends keyof AssetFormState>(k: K, v: AssetFormState[K]) =>
     setState((s) => ({ ...s, [k]: v }));
@@ -78,12 +90,22 @@ export function AssetForm({ onValuationQueued }: Props) {
       const r = await fetch("/api/value-asset", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ asset: state }),
+        body: JSON.stringify(
+          existingAsset
+            ? { existing_asset_id: existingAsset.id }
+            : { asset: state },
+        ),
       });
       const j = await r.json();
       if (!r.ok) {
         throw new Error(j?.error ? JSON.stringify(j.error) : r.statusText);
       }
+      captureEvent("valuation_queued", {
+        area: state.area,
+        asset_type: state.asset_type,
+        power_mw: state.power_mw,
+        energy_mwh: state.energy_mwh,
+      });
       onValuationQueued(j.valuation_id);
     } catch (e) {
       setError(String(e));
@@ -95,11 +117,20 @@ export function AssetForm({ onValuationQueued }: Props) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Asset configuration</CardTitle>
+        <CardTitle>{existingAsset ? "Run valuation on existing asset" : "Asset configuration"}</CardTitle>
         <CardDescription>
-          Configure a storage asset and run an LSM valuation against the latest
-          forecast paths for its area. Default is a 100 MW / 400 MWh lithium-ion
-          BESS in Tokyo per BUILD_SPEC §12 M7 operator demo.
+          {existingAsset ? (
+            <>
+              Re-running an existing asset (<span className="font-mono">{existingAsset.id.slice(0, 8)}</span>) against the latest
+              forecast paths. <button type="button" onClick={onClearExisting} className="underline">Clear selection</button> to create a new one.
+            </>
+          ) : (
+            <>
+              Configure a storage asset and run an LSM valuation against the latest
+              forecast paths for its area. Default is a 100 MW / 400 MWh lithium-ion
+              BESS in Tokyo per BUILD_SPEC §12 M7 operator demo.
+            </>
+          )}
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -188,33 +219,44 @@ export function AssetForm({ onValuationQueued }: Props) {
                 onChange={(e) => update("soc_max_pct", Number(e.target.value))}
               />
             </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-muted-foreground">Max cycles/year</label>
-              <input
-                type="number" min={0} step={1}
-                className={INPUT_CLS}
-                value={state.max_cycles_per_year}
-                onChange={(e) => update("max_cycles_per_year", Number(e.target.value))}
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-muted-foreground">Degradation (¥/MWh)</label>
-              <input
-                type="number" min={0} step={1}
-                className={INPUT_CLS}
-                value={state.degradation_jpy_mwh}
-                onChange={(e) => update("degradation_jpy_mwh", Number(e.target.value))}
-              />
-            </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <details className="rounded-md border border-foreground/10 px-3 py-2">
+            <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+              Advanced
+            </summary>
+            <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-muted-foreground">Max cycles/year</label>
+                <input
+                  type="number" min={0} step={1}
+                  className={INPUT_CLS}
+                  value={state.max_cycles_per_year}
+                  onChange={(e) => update("max_cycles_per_year", Number(e.target.value))}
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-muted-foreground">Degradation (¥/MWh)</label>
+                <input
+                  type="number" min={0} step={1}
+                  className={INPUT_CLS}
+                  value={state.degradation_jpy_mwh}
+                  onChange={(e) => update("degradation_jpy_mwh", Number(e.target.value))}
+                />
+              </div>
+            </div>
+          </details>
+
+          <div className="rounded-md border border-dashed border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 md:hidden dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
+            Read-only on mobile. Switch to desktop to run a valuation.
+          </div>
+          <div className="hidden items-center gap-3 md:flex">
             <button
               type="submit"
               disabled={submitting}
               className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >
-              {submitting ? "Queueing…" : "Run valuation"}
+              {submitting ? "Queueing…" : existingAsset ? "Re-run valuation" : "Run valuation"}
             </button>
             {error && <span className="text-sm text-red-600">Error: {error}</span>}
           </div>

@@ -74,3 +74,8 @@ select = ["E", "F", "W", "I", "B", "UP"]
 
 [tool.mypy]
 python_version = "3.11"
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: marks tests as slow (deselect with -m 'not slow')",
+]

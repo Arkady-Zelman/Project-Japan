@@ -21,6 +21,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
+import { FUEL_COLORS } from "@/lib/fuel-colors";
 
 const SELECT_CLS =
   "w-full appearance-none rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring";
@@ -62,20 +64,6 @@ type StackResponse = {
   realised_jpy_kwh: number | null;
 };
 
-const FUEL_COLORS: Record<string, string> = {
-  vre: "#22c55e",
-  nuclear: "#a855f7",
-  hydro: "#06b6d4",
-  pumped_storage: "#0ea5e9",
-  geothermal: "#84cc16",
-  biomass: "#65a30d",
-  lng_ccgt: "#3b82f6",
-  lng_steam: "#6366f1",
-  coal: "#737373",
-  oil: "#dc2626",
-  battery: "#f59e0b",
-};
-
 function todaySlotIso(): string {
   // Default to yesterday 12:00 JST = 03:00 UTC.
   const d = new Date();
@@ -101,20 +89,92 @@ function buildSlotOptions(date: string): { label: string; value: string }[] {
 export function StackInspector() {
   const [area, setArea] = useState<AreaCode>("TK");
   const [date, setDate] = useState<string>(() => {
-    // Yesterday in JST.
+    // Yesterday in JST as a placeholder; replaced on mount by the
+    // latest-slot lookup below.
     const d = new Date();
     d.setUTCDate(d.getUTCDate() - 1);
     return d.toISOString().slice(0, 10);
   });
   const [slot, setSlot] = useState<string>(todaySlotIso);
+  // Seeded state — true until the latest-slot lookup resolves at least
+  // once so we don't fire two consecutive /api/stack-curve fetches
+  // (placeholder → real) on first render.
+  const [seeded, setSeeded] = useState(false);
+  // Slots-with-data for the currently selected (area, date). Populated by a
+  // /api/stack-curve/slots fetch whenever those change; the dropdown shows
+  // ONLY these slots so the operator can't pick an empty cell.
+  const [availableSlots, setAvailableSlots] = useState<string[] | null>(null);
 
-  const slotOptions = useMemo(() => buildSlotOptions(date), [date]);
+  const slotOptions = useMemo(() => {
+    if (availableSlots) {
+      return availableSlots.map((iso) => {
+        const jst = new Date(new Date(iso).getTime() + 9 * 60 * 60 * 1000);
+        const hh = String(jst.getUTCHours()).padStart(2, "0");
+        const mm = String(jst.getUTCMinutes()).padStart(2, "0");
+        return { label: `${hh}:${mm} JST`, value: iso };
+      });
+    }
+    // Fallback while loading or for areas with zero coverage in the date.
+    return buildSlotOptions(date);
+  }, [availableSlots, date]);
 
   const [data, setData] = useState<StackResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  // On mount + on area change, ask the server for the latest slot that
+  // actually has a stack curve. Seeds the date + slot pickers so the tab
+  // opens to live data instead of an empty slot.
   useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/stack-curve/latest?area=${area}`)
+      .then(async (r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (cancelled || !j?.slot) {
+          setSeeded(true);
+          return;
+        }
+        const iso: string = j.slot;
+        setSlot(iso);
+        setDate(iso.slice(0, 10));
+        setSeeded(true);
+      })
+      .catch(() => {
+        if (!cancelled) setSeeded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [area]);
+
+  // Refetch the available-slots list whenever (area, date) changes. Snap the
+  // current slot to whatever's in the list (closest match) so we never have
+  // a stale `slot` value pointing at an empty cell.
+  useEffect(() => {
+    let cancelled = false;
+    setAvailableSlots(null);
+    fetch(`/api/stack-curve/slots?area=${area}&date=${date}`)
+      .then(async (r) => (r.ok ? r.json() : { slots: [] }))
+      .then((j) => {
+        if (cancelled) return;
+        const slots = (j.slots ?? []) as string[];
+        setAvailableSlots(slots);
+        // If current `slot` isn't in the list, snap to the first available
+        // (or leave alone if the list is empty so the empty-state renders).
+        if (slots.length > 0 && !slots.includes(slot)) {
+          setSlot(slots[0]!);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setAvailableSlots([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [area, date, slot]);
+
+  useEffect(() => {
+    if (!seeded) return;
     setLoading(true);
     setError(null);
     fetch(`/api/stack-curve?area=${area}&slot=${encodeURIComponent(slot)}`)
@@ -126,7 +186,7 @@ export function StackInspector() {
       .then((d) => setData(d))
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
-  }, [area, slot]);
+  }, [area, slot, seeded]);
 
   const chartData = useMemo(() => {
     // Recharts stepAfter wants (x_n, y_n) where y_n is held from x_{n-1} to x_n.
@@ -242,7 +302,12 @@ export function StackInspector() {
 
         <Separator />
 
-        {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
+        {loading && (
+          <div className="space-y-2">
+            <Skeleton className="h-4 w-48" />
+            <Skeleton className="h-[400px] w-full" />
+          </div>
+        )}
         {error && <p className="text-sm text-red-600">Error: {error}</p>}
 
         {data && data.curve && data.curve.length > 0 ? (

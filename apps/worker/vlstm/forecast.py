@@ -57,10 +57,20 @@ def _load_active_model() -> tuple[str, JEPXForecaster] | None:
         return None
     model_id, artifact_url = row[0], row[1]
 
-    # Resolve artifact_url. We support file:// for local + the
-    # Storage upload path will be wired in M6.5.
+    # Resolve weights location: file:// → local file; supabase:// → Storage
+    # download into LOCAL_WEIGHTS_PATH cache (M10C L2). Falls back to the
+    # plain LOCAL_WEIGHTS_PATH when no artifact_url is set.
     if artifact_url and artifact_url.startswith("file://"):
         weights_path = Path(artifact_url[len("file://"):])
+    elif artifact_url and artifact_url.startswith("supabase://"):
+        weights_path = LOCAL_WEIGHTS_PATH
+        if not weights_path.exists():
+            try:
+                from .storage import download_weights_from_storage
+                download_weights_from_storage(model_id, weights_path)
+            except Exception as e:
+                logger.warning("storage download failed for model %s: %s", model_id, e)
+                return None
     else:
         weights_path = LOCAL_WEIGHTS_PATH
     if not weights_path.exists():

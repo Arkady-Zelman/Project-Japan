@@ -99,6 +99,9 @@ class _AreaCache:
     vre_actuals_by_ts: dict[datetime, dict[str, float | None]]
     # Demand: dict[ts → demand_mw]
     demand_by_ts: dict[datetime, float | None]
+    # Per-generator availability (MW available at slot). When present, beats
+    # per-unit metadata.availability_factor and fleet-wide defaults.
+    availability_by_gen_ts: dict[tuple[str, datetime], float]
 
 
 # ---------------------------------------------------------------------------
@@ -182,6 +185,22 @@ def _load_area_cache(
     for ts, code, mw in cur.fetchall():
         vre_actuals.setdefault(ts, {})[code] = float(mw) if mw is not None else None
 
+    # Per-generator availability (M10C L9). Optional table; falls back to
+    # per-unit metadata.availability_factor or fleet-wide _DEFAULT_AVAILABILITY.
+    cur.execute(
+        """
+        select generator_id::text, slot_start, available_mw
+        from generator_availability
+        where slot_start >= %s and slot_start < %s
+        """,
+        (start, end),
+    )
+    availability_by_gen_ts: dict[tuple[str, datetime], float] = {}
+    for gid, ts, mw in cur.fetchall():
+        if mw is None:
+            continue
+        availability_by_gen_ts[(gid, ts)] = float(mw)
+
     # Demand actuals.
     cur.execute(
         """
@@ -203,6 +222,7 @@ def _load_area_cache(
         weather_by_ts=weather_by_ts,
         vre_actuals_by_ts=vre_actuals,
         demand_by_ts=demand_by_ts,
+        availability_by_gen_ts=availability_by_gen_ts,
     )
 
 
@@ -318,10 +338,15 @@ def _build_payload(
             co2_intensity_t_mwh=g.co2_intensity_t_mwh,
         )
         s = srmc.srmc_jpy_mwh(gen_proxy, fuel_price_jpy_mwh_thermal=thermal)
-        # Per-unit override beats the fleet default — see SESSION_LOG_2026-05-07
-        # for why nuclear especially needs per-area overrides.
-        avail = g.availability_factor if g.availability_factor is not None else _availability_factor(g.fuel_code)
-        eff_mw = g.capacity_mw * avail
+        # Time-varying availability (M10C L9) beats per-unit override beats
+        # fleet default. SESSION_LOG_2026-05-07 explains the rationale for the
+        # legacy per-area nuclear overrides.
+        explicit_mw = cache.availability_by_gen_ts.get((g.id, slot))
+        if explicit_mw is not None:
+            eff_mw = explicit_mw
+        else:
+            avail = g.availability_factor if g.availability_factor is not None else _availability_factor(g.fuel_code)
+            eff_mw = g.capacity_mw * avail
         units.append((g, s, eff_mw))
 
     units.sort(key=lambda x: x[1])
