@@ -137,7 +137,7 @@ async def run_agent_loop(
     ctx = ToolContext(user_id=user_id, session_id=session_id)
     tool_schemas = openai_tool_schemas()
 
-    for iteration in range(MAX_LOOP_ITERATIONS):
+    for _iteration in range(MAX_LOOP_ITERATIONS):
         try:
             stream = await client.chat.completions.create(
                 model=OPENAI_MODEL,

@@ -491,8 +491,9 @@ def run_backtest(payload: dict) -> dict:
     """
     from uuid import UUID
 
+    from backtest.runner import mark_failed
+    from backtest.runner import run_backtest as _run_backtest
     from common.sentry import init_sentry
-    from backtest.runner import mark_failed, run_backtest as _run_backtest
 
     init_sentry()
     backtest_id_str = payload.get("backtest_id")
@@ -523,8 +524,9 @@ def run_backtest_run(backtest_id: str, spread_jpy_kwh: float = 2.0) -> dict:
     """`modal run` variant of `run_backtest`. Same body."""
     from uuid import UUID
 
+    from backtest.runner import mark_failed
+    from backtest.runner import run_backtest as _run_backtest
     from common.sentry import init_sentry
-    from backtest.runner import mark_failed, run_backtest as _run_backtest
 
     init_sentry()
     bid = UUID(backtest_id)

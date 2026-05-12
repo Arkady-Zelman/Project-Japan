@@ -30,8 +30,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F  # noqa: N812
 
-from .models import HORIZON_SLOTS, LOOKBACK_SLOTS, N_AREAS
 from .data import N_FEATURES_PER_SLOT
+from .models import HORIZON_SLOTS, LOOKBACK_SLOTS, N_AREAS
 
 logger = logging.getLogger("vlstm.model")
 

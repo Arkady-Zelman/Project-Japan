@@ -348,7 +348,11 @@ def run_lsm(
         max_charge_step, max_discharge_step, sqrt_eff, degradation,
         discount_per_step, n_basis,
     )
-    forward_paths = paths if oos_paths is None else np.ascontiguousarray(oos_paths, dtype=np.float64)
+    forward_paths = (
+        paths
+        if oos_paths is None
+        else np.ascontiguousarray(oos_paths, dtype=np.float64)
+    )
     soc_paths, action_paths, accumulated = _forward_sweep(
         forward_paths, betas, scales, volume_grid,
         asset.soc_initial_mwh,

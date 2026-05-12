@@ -113,7 +113,9 @@ def evaluate_baseline(
     for code in area_codes:
         area_id = area_id_by_code[code]
         train = _load_prices(area_id, train_start, gate_start)
-        eval_ = _load_prices(area_id, gate_start, gate_end + timedelta(minutes=SLOT_MIN * HORIZON_SLOTS))
+        eval_ = _load_prices(
+            area_id, gate_start, gate_end + timedelta(minutes=SLOT_MIN * HORIZON_SLOTS)
+        )
         if len(train) < 100 or len(eval_) < HORIZON_SLOTS + 24:
             logger.warning("%s: insufficient data — train=%d eval=%d", code, len(train), len(eval_))
             out[code] = {"skipped": True, "n_train": len(train), "n_eval": len(eval_)}
@@ -131,7 +133,6 @@ def evaluate_baseline(
         for i, origin in enumerate(origins):
             if i % origin_step != 0:
                 continue
-            origin_ts = origin.to_pydatetime()
             # Need the price at `origin - 30min` (last observed) and the
             # next 48 prices for evaluation.
             try:

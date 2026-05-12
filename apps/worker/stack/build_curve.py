@@ -345,7 +345,11 @@ def _build_payload(
         if explicit_mw is not None:
             eff_mw = explicit_mw
         else:
-            avail = g.availability_factor if g.availability_factor is not None else _availability_factor(g.fuel_code)
+            avail = (
+                g.availability_factor
+                if g.availability_factor is not None
+                else _availability_factor(g.fuel_code)
+            )
             eff_mw = g.capacity_mw * avail
         units.append((g, s, eff_mw))
 

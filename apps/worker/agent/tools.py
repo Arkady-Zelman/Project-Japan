@@ -24,8 +24,7 @@ from uuid import UUID
 import httpx
 import numpy as np
 import pandas as pd
-import psycopg
-from scipy import stats   # type: ignore[import-untyped]
+from scipy import stats  # type: ignore[import-untyped]
 
 from common.audit import compute_run
 from common.db import connect
@@ -280,7 +279,7 @@ def fit_quick_model(args: dict, ctx: ToolContext) -> dict:
             if len(df) < 50:
                 return {"success": False, "error": f"need at least 50 non-null rows; got {len(df)}"}
 
-            from sklearn.ensemble import RandomForestRegressor   # local for cold-start
+            from sklearn.ensemble import RandomForestRegressor  # local for cold-start
             from sklearn.linear_model import LinearRegression, Ridge
             from sklearn.metrics import r2_score
             from sklearn.model_selection import train_test_split
@@ -304,12 +303,15 @@ def fit_quick_model(args: dict, ctx: ToolContext) -> dict:
                 "r2_holdout": round(r2, 4),
             }
             if hasattr(model, "coef_"):
-                output["coef"] = {f: round(float(c), 6) for f, c in zip(features, model.coef_)}
+                output["coef"] = {
+                    f: round(float(c), 6)
+                    for f, c in zip(features, model.coef_, strict=False)
+                }
                 output["intercept"] = round(float(getattr(model, "intercept_", 0.0)), 6)
             elif hasattr(model, "feature_importances_"):
                 output["feature_importances"] = {
                     f: round(float(c), 6)
-                    for f, c in zip(features, model.feature_importances_)
+                    for f, c in zip(features, model.feature_importances_, strict=False)
                 }
             run.set_output(output)
             return output
@@ -570,7 +572,10 @@ def openai_tool_schemas() -> list[dict]:
                     "properties": {
                         "sql": {
                             "type": "string",
-                            "description": "A single SELECT or WITH-SELECT statement in PostgreSQL syntax.",
+                            "description": (
+                                "A single SELECT or WITH-SELECT statement"
+                                " in PostgreSQL syntax."
+                            ),
                         }
                     },
                     "required": ["sql"],

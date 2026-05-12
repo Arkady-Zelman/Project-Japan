@@ -148,7 +148,8 @@ def _persist_model(
     with connect() as conn, conn.cursor() as cur:
         # Demote any prior 'ready' row.
         cur.execute(
-            "update models set status='deprecated' where type='vlstm' and name=%s and status='ready'",
+            "update models set status='deprecated' "
+            "where type='vlstm' and name=%s and status='ready'",
             (name,),
         )
         cur.execute(

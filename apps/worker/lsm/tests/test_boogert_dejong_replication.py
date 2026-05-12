@@ -69,7 +69,8 @@ def test_replicates_boogert_dejong_table2_p3() -> None:
         f"  intrinsic  = {result.intrinsic_jpy:,.0f} EUR\n"
         f"  extrinsic  = {result.extrinsic_jpy:,.0f} EUR\n"
         f"  CI 5/95    = [{result.ci_lower_jpy:,.0f}, {result.ci_upper_jpy:,.0f}]\n"
-        f"  Table 2    = {PAPER_RANGE_LO:,}–{PAPER_RANGE_HI:,} EUR  (±{TOLERANCE_PCT * 100:.0f}% → [{LO:,.0f}, {HI:,.0f}])\n"
+        f"  Table 2    = {PAPER_RANGE_LO:,}–{PAPER_RANGE_HI:,} EUR  "
+        f"(±{TOLERANCE_PCT * 100:.0f}% → [{LO:,.0f}, {HI:,.0f}])\n"
         f"  runtime    = {result.runtime_seconds:.2f}s"
     )
     assert LO <= result.total_jpy <= HI, (

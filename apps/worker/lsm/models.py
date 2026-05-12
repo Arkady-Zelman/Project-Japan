@@ -18,7 +18,9 @@ class AssetSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = "anonymous"
-    asset_type: Literal["bess_li_ion", "pumped_hydro", "compressed_air", "gas_storage"] = "bess_li_ion"
+    asset_type: Literal[
+        "bess_li_ion", "pumped_hydro", "compressed_air", "gas_storage"
+    ] = "bess_li_ion"
 
     # Energy and SoC bounds in MWh.
     energy_mwh: float = Field(gt=0)

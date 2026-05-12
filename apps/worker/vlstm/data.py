@@ -49,7 +49,6 @@ from common.db import connect
 from .models import (
     HORIZON_SLOTS,
     LOOKBACK_SLOTS,
-    N_AREAS,
     AreaCode,
     FeatureWindow,
 )
@@ -176,7 +175,9 @@ def build_area_cache(
     gm_acc: dict[datetime, dict[str, float]] = {}
     for ts, code, mw in cur.fetchall():
         v = float(mw)
-        d = gm_acc.setdefault(ts, {"vre": 0.0, "nuclear": 0.0, "lng": 0.0, "coal": 0.0, "hydro": 0.0})
+        d = gm_acc.setdefault(
+            ts, {"vre": 0.0, "nuclear": 0.0, "lng": 0.0, "coal": 0.0, "hydro": 0.0}
+        )
         if code in _VRE:
             d["vre"] += v
         elif code in _NUCLEAR:

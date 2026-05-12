@@ -20,8 +20,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timedelta
-from typing import cast
+from datetime import datetime
 from uuid import UUID
 
 import numpy as np
@@ -114,7 +113,7 @@ def _load_forecast_paths(
     run = cur.fetchone()
     if not run:
         raise RuntimeError(f"forecast_run {forecast_run_id} not found")
-    horizon_slots, n_paths, origin = int(run[0]), int(run[1]), run[2]
+    horizon_slots, n_paths = int(run[0]), int(run[1])
 
     cur.execute(
         """

@@ -101,7 +101,9 @@ def infer_area(
 
                 resids = _load_residuals(cur, area_id, area_code, start, end)
                 if len(resids.residuals) < 50:
-                    run.set_output({"skipped": "insufficient_residuals", "n": int(len(resids.residuals))})
+                    run.set_output(
+                        {"skipped": "insufficient_residuals", "n": int(len(resids.residuals))}
+                    )
                     return 0
 
                 smoothed, mapping = _smoothed_probs(

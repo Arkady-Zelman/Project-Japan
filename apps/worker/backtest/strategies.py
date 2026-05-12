@@ -79,8 +79,16 @@ class NaiveSpreadStrategy:
         prices = np.asarray(realised_prices_jpy_kwh, dtype=np.float64)
         T = prices.shape[0]
         # Default thresholds = 30th / 70th percentile of the window.
-        buy = self.buy_threshold if self.buy_threshold is not None else float(np.percentile(prices, 30))
-        sell = self.sell_threshold if self.sell_threshold is not None else float(np.percentile(prices, 70))
+        buy = (
+            self.buy_threshold
+            if self.buy_threshold is not None
+            else float(np.percentile(prices, 30))
+        )
+        sell = (
+            self.sell_threshold
+            if self.sell_threshold is not None
+            else float(np.percentile(prices, 70))
+        )
 
         max_charge_step = asset.power_mw_charge * HOURS_PER_SLOT
         max_discharge_step = asset.power_mw_discharge * HOURS_PER_SLOT
