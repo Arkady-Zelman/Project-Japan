@@ -3,7 +3,12 @@
  *
  * Pulls the requested forward curve, runs the BoS optimisation, returns the
  * basket + value breakdown + per-day physical profile + per-slot tradeable
- * view. Auth-required since results are user-asset-specific.
+ * view.
+ *
+ * Auth: optional. Logged-in users see results for their own asset (first by
+ * default, or `?asset_id=…` explicitly — explicit IDs require auth so we
+ * don't leak other users' assets). Anonymous viewers get a synthetic demo
+ * asset in Tokyo so the public dashboard demonstrates the methodology.
  */
 
 import { NextResponse } from "next/server";
@@ -22,9 +27,6 @@ export async function GET(request: Request) {
   const session = createSessionClient();
   const { data: userData } = await session.auth.getUser();
   const userId = userData.user?.id;
-  if (!userId) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  }
 
   const url = new URL(request.url);
   const sourceParam = url.searchParams.get("source") ?? "forecast";
@@ -34,30 +36,95 @@ export async function GET(request: Request) {
     Math.max(Number(url.searchParams.get("horizon_slots") ?? DEFAULT_HORIZON_SLOTS), 8),
     336,
   );
+  const explicitAssetId = url.searchParams.get("asset_id");
+
+  // Explicit asset_id implies "show *this* user's asset", so require auth.
+  if (explicitAssetId && !userId) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
 
   const supabase = createServerClient();
 
-  // Resolve the asset — explicit asset_id wins, otherwise default to user's
-  // first asset.
-  const assetId = url.searchParams.get("asset_id");
-  const assetQuery = supabase
-    .from("assets")
-    .select(
-      "id, name, area_id, power_mw, energy_mwh, round_trip_eff, soc_min_pct, soc_max_pct, areas!inner(code, name_en)",
-    )
-    .eq("user_id", userId);
-  const { data: assetRow, error: assetErr } = await (
-    assetId ? assetQuery.eq("id", assetId).maybeSingle() : assetQuery.limit(1).maybeSingle()
-  );
-  if (assetErr) {
-    return NextResponse.json({ error: assetErr.message }, { status: 500 });
+  // Try to find a real asset for the logged-in user, if any.
+  type AssetRow = {
+    id: string;
+    name: string;
+    area_id: string;
+    power_mw: number | string;
+    energy_mwh: number | string;
+    round_trip_eff: number | string;
+    soc_min_pct: number | string;
+    soc_max_pct: number | string;
+    areas: { code: string }[] | { code: string };
+  };
+  let realAsset: AssetRow | null = null;
+  if (userId) {
+    const q = supabase
+      .from("assets")
+      .select(
+        "id, name, area_id, power_mw, energy_mwh, round_trip_eff, soc_min_pct, soc_max_pct, areas!inner(code, name_en)",
+      )
+      .eq("user_id", userId);
+    const { data, error } = await (
+      explicitAssetId
+        ? q.eq("id", explicitAssetId).maybeSingle()
+        : q.limit(1).maybeSingle()
+    );
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+    realAsset = (data as AssetRow | null) ?? null;
   }
-  if (!assetRow) {
-    return NextResponse.json({ error: "no asset found for user" }, { status: 404 });
+
+  // Resolve area + asset spec. Anonymous viewers (and logged-in users with
+  // no assets yet) get a synthetic 100 MWh / 50 MW BESS in Tokyo so the
+  // public dashboard always has something to render.
+  let area_id: string;
+  let areaCode: string | undefined;
+  let assetMeta: { id: string; name: string };
+  let assetSpec: {
+    power_mw: number;
+    energy_mwh: number;
+    round_trip_eff: number;
+    soc_min_pct: number;
+    soc_max_pct: number;
+  };
+
+  if (realAsset) {
+    const areaField = realAsset.areas;
+    areaCode = Array.isArray(areaField) ? areaField[0]?.code : areaField?.code;
+    area_id = realAsset.area_id;
+    assetMeta = { id: realAsset.id, name: realAsset.name };
+    assetSpec = {
+      power_mw: Number(realAsset.power_mw),
+      energy_mwh: Number(realAsset.energy_mwh),
+      round_trip_eff: Number(realAsset.round_trip_eff),
+      soc_min_pct: Number(realAsset.soc_min_pct),
+      soc_max_pct: Number(realAsset.soc_max_pct),
+    };
+  } else {
+    const { data: areaRow } = await supabase
+      .from("areas")
+      .select("id, code")
+      .eq("code", "TK")
+      .maybeSingle();
+    if (!areaRow) {
+      return NextResponse.json(
+        { error: "Tokyo area not found in database" },
+        { status: 500 },
+      );
+    }
+    area_id = areaRow.id as string;
+    areaCode = areaRow.code as string;
+    assetMeta = { id: "demo", name: "Demo: 100 MWh / 50 MW BESS (Tokyo)" };
+    assetSpec = {
+      power_mw: 50,
+      energy_mwh: 100,
+      round_trip_eff: 0.85,
+      soc_min_pct: 10,
+      soc_max_pct: 90,
+    };
   }
-  const area_id = assetRow.area_id as string;
-  const areaField = (assetRow as { areas: { code: string }[] | { code: string } }).areas;
-  const areaCode = Array.isArray(areaField) ? areaField[0]?.code : areaField?.code;
 
   // Pull the forward curve.
   let forward: ForwardPoint[] = [];
@@ -75,25 +142,17 @@ export async function GET(request: Request) {
     );
   }
 
-  const asset = {
-    power_mw: Number(assetRow.power_mw),
-    energy_mwh: Number(assetRow.energy_mwh),
-    round_trip_eff: Number(assetRow.round_trip_eff),
-    soc_min_pct: Number(assetRow.soc_min_pct),
-    soc_max_pct: Number(assetRow.soc_max_pct),
-  };
-
-  const result = runBoS(forward, asset, { dt_hours: 0.5, corr_decay_hours: 24 });
+  const result = runBoS(forward, assetSpec, { dt_hours: 0.5, corr_decay_hours: 24 });
 
   return NextResponse.json({
     source: forward.length > 0 ? source : "realised",
     asset: {
-      id: assetRow.id,
-      name: assetRow.name,
+      id: assetMeta.id,
+      name: assetMeta.name,
       area: areaCode,
-      power_mw: asset.power_mw,
-      energy_mwh: asset.energy_mwh,
-      round_trip_eff: asset.round_trip_eff,
+      power_mw: assetSpec.power_mw,
+      energy_mwh: assetSpec.energy_mwh,
+      round_trip_eff: assetSpec.round_trip_eff,
     },
     horizon_slots: forward.length,
     dt_hours: 0.5,
