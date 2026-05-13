@@ -243,8 +243,29 @@ function fmtHHMM(ts: string): string {
   return `${hh}:${mm}`;
 }
 
+/**
+ * Date-aware slot label. Falls back to `HH:MM` when every slot in the
+ * series falls on the same UTC calendar day; otherwise prepends MM-DD so
+ * the X-axis distinguishes Day 1 11:30 from Day 2 11:30.
+ */
+function buildSlotLabeler(tradeable: { ts: string }[]): (ts: string) => string {
+  const days = new Set<string>();
+  for (const s of tradeable) days.add(s.ts.slice(0, 10));
+  const multiDay = days.size > 1;
+  if (!multiDay) return fmtHHMM;
+  return (ts: string) => {
+    const d = new Date(ts);
+    const mo = String(d.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(d.getUTCDate()).padStart(2, "0");
+    const hh = String(d.getUTCHours()).padStart(2, "0");
+    const mm = String(d.getUTCMinutes()).padStart(2, "0");
+    return `${mo}-${dd} ${hh}:${mm}`;
+  };
+}
+
 function PhysicalProfile({ data }: { data: BoSResponse }) {
   const dtHours = data.dt_hours ?? 0.5;
+  const labeler = useMemo(() => buildSlotLabeler(data.tradeable), [data.tradeable]);
   const chartData = useMemo(() => {
     // Running inventory in MWh through the half-hourly schedule.
     const eta = Math.sqrt(data.asset.round_trip_eff);
@@ -255,7 +276,7 @@ function PhysicalProfile({ data }: { data: BoSResponse }) {
       inv += charge * eta - discharge / eta;
       return {
         ts: s.ts,
-        label: fmtHHMM(s.ts),
+        label: labeler(s.ts),
         charge: Math.round(charge * 10) / 10,
         discharge: -Math.round(discharge * 10) / 10,
         inventory: Math.round(inv * 10) / 10,
@@ -320,6 +341,7 @@ function PhysicalProfile({ data }: { data: BoSResponse }) {
 }
 
 function ExpectedPnL({ data }: { data: BoSResponse }) {
+  const labeler = useMemo(() => buildSlotLabeler(data.tradeable), [data.tradeable]);
   const chartData = useMemo(() => {
     let cum = 0;
     let cumCharge = 0;
@@ -333,7 +355,7 @@ function ExpectedPnL({ data }: { data: BoSResponse }) {
       else if (s.net_position_mwh < 0) cumDischarge += cashflow_jpy;
       return {
         ts: s.ts,
-        label: fmtHHMM(s.ts),
+        label: labeler(s.ts),
         cum_pnl: Math.round(cum),
         cum_charge_cost: -Math.round(cumCharge),
         cum_discharge_rev: Math.round(cumDischarge),

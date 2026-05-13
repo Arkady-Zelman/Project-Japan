@@ -168,10 +168,19 @@ export function runBoS(
       // Per-kWh option value with K=0:
       //   V = max(S, 0) + sigma*sqrt(T)*phi(d) - max(S,0)*N(-|d|)*sign(S)
       // Simpler ATM-style approximation: intrinsic + sigma*sqrt(T)/sqrt(2pi).
+      //
+      // CRITICAL: we filter on `intrinsic`, not `intrinsic + extrinsic`.
+      // The basket is a *physical commitment* to charge at i and discharge
+      // at j — once allocated, the trade locks in the spread. If spread<0,
+      // we lose money on every kWh moved; the Bachelier extrinsic term is
+      // a valuation premium for *optionality*, which doesn't exist for a
+      // committed schedule. So negative-intrinsic pairs must never be
+      // allocated, regardless of how big their σ√T is. Extrinsic is then
+      // layered on top of the chosen basket as a valuation adjustment.
       const intrinsic_kwh = Math.max(spread, 0);
       const extrinsic_kwh = sigma_T / SQRT_2PI;
+      if (intrinsic_kwh <= 0) continue;
       const total_kwh = intrinsic_kwh + extrinsic_kwh;
-      if (total_kwh <= 0) continue;
       candidates.push({
         i,
         j,
