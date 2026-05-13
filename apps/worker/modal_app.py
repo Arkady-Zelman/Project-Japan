@@ -16,7 +16,7 @@ Modal Secrets:
                        SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, OPENAI_API_KEY,
                        FRANKFURTER_BASE_URL, OPEN_METEO_BASE_URL,
                        OPEN_METEO_FORECAST_URL, JAPANESEPOWER_BASE_URL,
-                       CME_BASE_URL, SENTRY_DSN.
+                       CME_BASE_URL, SENTRY_DSN, MODAL_API_TOKEN.
                        Operator creates this in the Modal dashboard with
                        `modal secret create jepx-supabase --from-dotenv apps/worker/.env`.
 
@@ -27,10 +27,14 @@ share infrastructure from `apps/worker/common/`.
 from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
+from typing import Annotated
 
 import modal
+from fastapi import Depends
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 app = modal.App("jepx-storage")
+_bearer_auth = HTTPBearer(auto_error=False)
 
 # Shared image used by every function in this app. Python 3.12 per BUILD_SPEC
 # §11 line 1087. Worker source mounted at /root via add_local_python_source.
@@ -468,7 +472,10 @@ def forecast_vlstm_evening() -> dict:
 
 @app.function(image=base_image, cpu=4.0, timeout=600, secrets=_secrets)
 @modal.fastapi_endpoint(method="POST", label="lsm-value")
-def lsm_value(payload: dict) -> dict:
+def lsm_value(
+    payload: dict,
+    token: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer_auth)],
+) -> dict:
     """On-demand LSM valuation. Body: `{"valuation_id": "<uuid>"}`.
 
     Returns the headline numbers; full per-slot decisions are written to
@@ -477,10 +484,12 @@ def lsm_value(payload: dict) -> dict:
     """
     from uuid import UUID
 
+    from common.http_auth import require_modal_api_token
     from common.sentry import init_sentry
     from lsm.runner import mark_failed, run_valuation
 
     init_sentry()
+    require_modal_api_token(token)
     valuation_id_str = payload.get("valuation_id")
     if not valuation_id_str:
         return {"error": "valuation_id required"}
@@ -526,7 +535,10 @@ def lsm_value_run(valuation_id: str) -> dict:
 
 @app.function(image=base_image, cpu=4.0, timeout=900, secrets=_secrets)
 @modal.fastapi_endpoint(method="POST", label="run-backtest")
-def run_backtest(payload: dict) -> dict:
+def run_backtest(
+    payload: dict,
+    token: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer_auth)],
+) -> dict:
     """On-demand strategy backtest. Body: `{"backtest_id": "<uuid>", "spread_jpy_kwh": 2.0?}`.
 
     Returns the headline metrics; full per-slot trade rows are persisted
@@ -537,9 +549,11 @@ def run_backtest(payload: dict) -> dict:
 
     from backtest.runner import mark_failed
     from backtest.runner import run_backtest as _run_backtest
+    from common.http_auth import require_modal_api_token
     from common.sentry import init_sentry
 
     init_sentry()
+    require_modal_api_token(token)
     backtest_id_str = payload.get("backtest_id")
     if not backtest_id_str:
         return {"error": "backtest_id required"}

@@ -25,6 +25,7 @@ import { z } from "zod";
 import { createServerClient, createSessionClient } from "@/lib/supabase/server";
 
 const MODAL_LSM_ENDPOINT = process.env.MODAL_LSM_ENDPOINT;
+const MODAL_API_TOKEN = process.env.MODAL_API_TOKEN;
 
 const assetSchema = z.object({
   name: z.string().min(1).max(120),
@@ -67,6 +68,12 @@ export async function POST(request: Request) {
   const parsed = requestSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+  }
+  if (MODAL_LSM_ENDPOINT && !MODAL_API_TOKEN) {
+    return NextResponse.json(
+      { error: "MODAL_API_TOKEN not configured" },
+      { status: 500 },
+    );
   }
 
   const supabase = createServerClient();
@@ -216,7 +223,10 @@ export async function POST(request: Request) {
   if (MODAL_LSM_ENDPOINT) {
     fetch(MODAL_LSM_ENDPOINT, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "authorization": `Bearer ${MODAL_API_TOKEN}`,
+        "content-type": "application/json",
+      },
       body: JSON.stringify({ valuation_id }),
     }).catch((e) => {
       console.error("modal lsm-value POST failed:", e);

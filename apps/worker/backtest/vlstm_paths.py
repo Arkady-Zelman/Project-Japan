@@ -11,7 +11,7 @@ that slot — the LSMVLSTMStrategy falls back to stack-driven forecasts.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import cast
 
 import numpy as np
@@ -26,7 +26,7 @@ def load_vlstm_paths_per_origin(
     slot_starts: list[datetime],
     *,
     lookahead_slots: int = 48,
-    roll_interval_slots: int = 24,
+    roll_interval_slots: int = 2,
 ) -> list[np.ndarray | None]:
     """Return forecast_paths matrices per LSM roll origin.
 
@@ -35,7 +35,7 @@ def load_vlstm_paths_per_origin(
         slot_starts: full list of realised slot_start timestamps in the
             backtest window.
         lookahead_slots: number of half-hour slots in each forecast (= 48).
-        roll_interval_slots: how often LSM rolls (= 24, i.e. every 12h).
+        roll_interval_slots: how often LSM rolls (= 2, i.e. every 1h).
 
     Returns:
         List of (P, lookahead_slots+1) ndarrays in JPY/kWh, one per origin.
@@ -67,32 +67,56 @@ def load_vlstm_paths_per_origin(
                 continue
             run_id = cast(str, row[0])
 
-            # Pull all (path_index, slot_ix, price_jpy_kwh) rows for that run.
+            horizon_end = origin_ts + timedelta(minutes=30 * H)
+            # Pull forecast rows using the persisted schema. Older code used
+            # synthetic path_index/slot_ix columns that do not exist.
             cur.execute(
                 """
-                select path_index, slot_ix, price_jpy_kwh
+                select path_id, slot_start, price_jpy_kwh
                 from forecast_paths
-                where run_id = %s and slot_ix < %s
+                where forecast_run_id = %s
+                  and slot_start >= %s
+                  and slot_start < %s
+                order by path_id, slot_start
                 """,
-                (run_id, H + 1),
+                (run_id, origin_ts, horizon_end),
             )
             rows = cur.fetchall()
             if not rows:
                 out[i] = None
                 continue
-            # Reshape into (P, H+1).
-            max_path = max(int(r[0]) for r in rows)
-            max_slot = max(int(r[1]) for r in rows)
-            P = max_path + 1
-            S = max_slot + 1
-            mat = np.full((P, S), np.nan, dtype=np.float64)
-            for r in rows:
-                mat[int(r[0]), int(r[1])] = float(r[2])
-            # Drop any path rows with NaN (incomplete).
-            valid = ~np.isnan(mat).any(axis=1)
-            mat = mat[valid]
-            if mat.shape[0] == 0:
+
+            # Reshape into (P, H+1). forecast_paths stores H executable slots;
+            # run_lsm expects an extra post-horizon price anchor, so we append
+            # the last available price per path.
+            by_path: dict[int, np.ndarray] = {}
+            for path_id, slot_start, price_kwh in rows:
+                path_ix = int(path_id)
+                arr = by_path.setdefault(path_ix, np.full(H + 1, np.nan, dtype=np.float64))
+                slot_ix = _slot_offset(origin_ts, slot_start)
+                if 0 <= slot_ix < H:
+                    arr[slot_ix] = float(price_kwh)
+
+            complete_paths: list[np.ndarray] = []
+            for arr in by_path.values():
+                if np.isnan(arr[0]):
+                    continue
+                for j in range(1, H + 1):
+                    if np.isnan(arr[j]):
+                        arr[j] = arr[j - 1]
+                complete_paths.append(arr)
+
+            if not complete_paths:
                 out[i] = None
                 continue
-            out[i] = mat
+            out[i] = np.vstack(complete_paths)
     return out
+
+
+def _slot_offset(origin: datetime, slot_start: datetime) -> int:
+    """Return half-hour offset from origin, tolerating naive/aware mixing."""
+    if origin.tzinfo is None and slot_start.tzinfo is not None:
+        origin = origin.replace(tzinfo=slot_start.tzinfo)
+    elif origin.tzinfo is not None and slot_start.tzinfo is None:
+        slot_start = slot_start.replace(tzinfo=origin.tzinfo)
+    return int(round((slot_start - origin).total_seconds() / (30 * 60)))
