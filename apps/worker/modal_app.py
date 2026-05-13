@@ -27,10 +27,11 @@ share infrastructure from `apps/worker/common/`.
 from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
+from typing import Annotated
 
+import modal
 from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-import modal
 
 app = modal.App("jepx-storage")
 _bearer_auth = HTTPBearer(auto_error=False)
@@ -473,7 +474,7 @@ def forecast_vlstm_evening() -> dict:
 @modal.fastapi_endpoint(method="POST", label="lsm-value")
 def lsm_value(
     payload: dict,
-    token: HTTPAuthorizationCredentials | None = Depends(_bearer_auth),
+    token: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer_auth)],
 ) -> dict:
     """On-demand LSM valuation. Body: `{"valuation_id": "<uuid>"}`.
 
@@ -536,7 +537,7 @@ def lsm_value_run(valuation_id: str) -> dict:
 @modal.fastapi_endpoint(method="POST", label="run-backtest")
 def run_backtest(
     payload: dict,
-    token: HTTPAuthorizationCredentials | None = Depends(_bearer_auth),
+    token: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer_auth)],
 ) -> dict:
     """On-demand strategy backtest. Body: `{"backtest_id": "<uuid>", "spread_jpy_kwh": 2.0?}`.
 
