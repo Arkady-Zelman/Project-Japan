@@ -121,8 +121,8 @@ export async function GET(request: Request) {
       power_mw: 50,
       energy_mwh: 100,
       round_trip_eff: 0.85,
-      soc_min_pct: 10,
-      soc_max_pct: 90,
+      soc_min_pct: 0.10,
+      soc_max_pct: 0.90,
     };
   }
 
