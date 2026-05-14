@@ -1,5 +1,7 @@
 # Project Japan — JEPX Storage Analytics
 
+**[Live Dashboard](projectjapan.vercel.app)**
+
 A power-market analytics platform for Japan: how much is an hour of cheap solar at noon worth to a battery in Tokyo? How much will a pumped-hydro plant in Hokkaido earn over the next year? What does the supply curve actually look like when 70% of the kerosene plants are offline for maintenance?
 
 This repository answers those questions with a live dashboard, probabilistic price forecasts, and a Monte-Carlo valuation engine for grid-scale storage.
