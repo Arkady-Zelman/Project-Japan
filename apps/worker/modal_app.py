@@ -26,6 +26,8 @@ share infrastructure from `apps/worker/common/`.
 
 from __future__ import annotations
 
+import hmac
+import os
 from datetime import UTC, date, datetime, timedelta
 
 import modal
@@ -81,6 +83,19 @@ base_image = (
 # Secret group injected as env vars at runtime. Created by the operator in the
 # Modal dashboard before the first cron firing.
 _secrets = [modal.Secret.from_name("jepx-supabase")]
+
+
+def _require_modal_api_token(payload: dict) -> None:
+    """Fail closed unless Vercel includes the shared Modal API token."""
+    from fastapi import HTTPException
+
+    expected = os.environ.get("MODAL_API_TOKEN")
+    if not expected:
+        raise HTTPException(status_code=503, detail="MODAL_API_TOKEN not configured")
+
+    supplied = payload.get("api_token")
+    if not isinstance(supplied, str) or not hmac.compare_digest(supplied, expected):
+        raise HTTPException(status_code=401, detail="unauthorized")
 
 
 # ---------------------------------------------------------------------------
@@ -481,6 +496,7 @@ def lsm_value(payload: dict) -> dict:
     from lsm.runner import mark_failed, run_valuation
 
     init_sentry()
+    _require_modal_api_token(payload)
     valuation_id_str = payload.get("valuation_id")
     if not valuation_id_str:
         return {"error": "valuation_id required"}
@@ -540,6 +556,7 @@ def run_backtest(payload: dict) -> dict:
     from common.sentry import init_sentry
 
     init_sentry()
+    _require_modal_api_token(payload)
     backtest_id_str = payload.get("backtest_id")
     if not backtest_id_str:
         return {"error": "backtest_id required"}

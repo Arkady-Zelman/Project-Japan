@@ -127,20 +127,54 @@ def _load_forecast_paths(
     rows = cur.fetchall()
     expected = horizon_slots * n_paths
     if len(rows) != expected:
-        logger.warning(
-            "forecast_paths row count %d != %d (horizon %d × paths %d)",
-            len(rows), expected, horizon_slots, n_paths,
+        raise RuntimeError(
+            "incomplete forecast_paths for run "
+            f"{forecast_run_id}: found {len(rows)} rows, expected {expected} "
+            f"({horizon_slots} horizon slots x {n_paths} paths)"
         )
 
     # Build (n_paths, horizon_slots) price matrix in JPY/MWh.
     slot_set: dict[datetime, int] = {}
     paths_kwh = np.zeros((n_paths, horizon_slots), dtype=np.float64)
+    seen = np.zeros((n_paths, horizon_slots), dtype=np.bool_)
     for path_id, slot_start, price_kwh in rows:
+        path_idx = int(path_id)
+        if path_idx < 0 or path_idx >= n_paths:
+            raise RuntimeError(
+                f"forecast_paths path_id {path_idx} outside expected range 0..{n_paths - 1}"
+            )
         if slot_start not in slot_set:
+            if len(slot_set) >= horizon_slots:
+                raise RuntimeError(
+                    "forecast_paths contains more distinct slots than "
+                    f"forecast_runs.horizon_slots={horizon_slots}"
+                )
             slot_set[slot_start] = len(slot_set)
         t_idx = slot_set[slot_start]
-        paths_kwh[int(path_id), t_idx] = float(price_kwh)
+        if seen[path_idx, t_idx]:
+            raise RuntimeError(
+                f"duplicate forecast_paths cell for path_id={path_idx}, slot_start={slot_start}"
+            )
+        if price_kwh is None:
+            raise RuntimeError(
+                f"forecast_paths has null price for path_id={path_idx}, slot_start={slot_start}"
+            )
+        paths_kwh[path_idx, t_idx] = float(price_kwh)
+        seen[path_idx, t_idx] = True
     slot_starts = sorted(slot_set.keys())
+    if len(slot_starts) != horizon_slots:
+        raise RuntimeError(
+            "forecast_paths slot count mismatch for run "
+            f"{forecast_run_id}: found {len(slot_starts)} distinct slots, "
+            f"expected {horizon_slots}"
+        )
+    missing = int(seen.size - seen.sum())
+    if missing:
+        examples = np.argwhere(~seen)[:5].tolist()
+        raise RuntimeError(
+            "forecast_paths is missing "
+            f"{missing} path-slot cells for run {forecast_run_id}; examples={examples}"
+        )
 
     # Engine wants prices in JPY/MWh (so cash flows are in JPY when multiplied
     # by MWh of action). forecast_paths stores JPY/kWh — multiply by 1000.
