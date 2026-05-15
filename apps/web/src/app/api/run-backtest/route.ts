@@ -20,6 +20,7 @@ import { z } from "zod";
 import { createServerClient, createSessionClient } from "@/lib/supabase/server";
 
 const MODAL_BACKTEST_ENDPOINT = process.env.MODAL_BACKTEST_ENDPOINT;
+const MODAL_API_TOKEN = process.env.MODAL_API_TOKEN;
 
 const requestSchema = z.object({
   asset_id: z.string().uuid(),
@@ -66,6 +67,13 @@ export async function POST(request: Request) {
   }
 
   const supabase = createServerClient();
+
+  if (MODAL_BACKTEST_ENDPOINT && !MODAL_API_TOKEN) {
+    return NextResponse.json(
+      { error: "MODAL_API_TOKEN not configured" },
+      { status: 500 },
+    );
+  }
 
   const { data: asset } = await supabase
     .from("assets")
@@ -122,6 +130,7 @@ export async function POST(request: Request) {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           backtest_id: row.id,
+          api_token: MODAL_API_TOKEN,
           spread_jpy_kwh,
           naive_buy_threshold_jpy_kwh,
           naive_sell_threshold_jpy_kwh,
