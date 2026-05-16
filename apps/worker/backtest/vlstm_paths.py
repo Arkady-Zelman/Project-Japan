@@ -18,9 +18,11 @@ import numpy as np
 
 from common.db import connect
 
-from .strategies import DEFAULT_ROLL_INTERVAL_SLOTS
-
 logger = logging.getLogger("backtest.vlstm_paths")
+
+# Must match LSMVLSTMStrategy's rolling grid; otherwise the loader hands the
+# strategy forecasts anchored to different timestamps than the action origins.
+DEFAULT_ROLL_INTERVAL_SLOTS = 2
 
 
 def load_vlstm_paths_per_origin(
