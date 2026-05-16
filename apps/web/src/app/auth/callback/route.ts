@@ -9,10 +9,24 @@ import { createSessionClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
+const DEFAULT_NEXT = "/workbench";
+
+function safeNextUrl(next: string | null, origin: string): URL {
+  if (!next) {
+    return new URL(DEFAULT_NEXT, origin);
+  }
+
+  const candidate = new URL(next, origin);
+  if (candidate.origin !== origin) {
+    return new URL(DEFAULT_NEXT, origin);
+  }
+  return candidate;
+}
+
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
-  const next = url.searchParams.get("next") ?? "/workbench";
+  const next = url.searchParams.get("next");
 
   if (!code) {
     return NextResponse.redirect(new URL("/login?error=missing_code", url.origin));
@@ -26,5 +40,5 @@ export async function GET(request: Request) {
     return NextResponse.redirect(failUrl);
   }
 
-  return NextResponse.redirect(new URL(next, url.origin));
+  return NextResponse.redirect(safeNextUrl(next, url.origin));
 }
