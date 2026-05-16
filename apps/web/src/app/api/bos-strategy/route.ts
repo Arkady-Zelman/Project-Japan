@@ -75,6 +75,9 @@ export async function GET(request: Request) {
     }
     realAsset = (data as AssetRow | null) ?? null;
   }
+  if (explicitAssetId && !realAsset) {
+    return NextResponse.json({ error: "asset not found" }, { status: 404 });
+  }
 
   // Resolve area + asset spec. Anonymous viewers (and logged-in users with
   // no assets yet) get a synthetic 100 MWh / 50 MW BESS in Tokyo so the
@@ -121,18 +124,20 @@ export async function GET(request: Request) {
       power_mw: 50,
       energy_mwh: 100,
       round_trip_eff: 0.85,
-      soc_min_pct: 10,
-      soc_max_pct: 90,
+      soc_min_pct: 0.10,
+      soc_max_pct: 0.90,
     };
   }
 
   // Pull the forward curve.
   let forward: ForwardPoint[] = [];
+  let actualSource: "forecast" | "realised" = source;
   if (source === "forecast") {
     forward = await buildForecastCurve(supabase, area_id, horizonSlots);
   }
   // Fall back to realised if no forecast available.
   if (forward.length === 0) {
+    actualSource = "realised";
     forward = await buildRealisedCurve(supabase, area_id, horizonSlots);
   }
   if (forward.length === 0) {
@@ -145,7 +150,7 @@ export async function GET(request: Request) {
   const result = runBoS(forward, assetSpec, { dt_hours: 0.5, corr_decay_hours: 24 });
 
   return NextResponse.json({
-    source: forward.length > 0 ? source : "realised",
+    source: actualSource,
     asset: {
       id: assetMeta.id,
       name: assetMeta.name,
