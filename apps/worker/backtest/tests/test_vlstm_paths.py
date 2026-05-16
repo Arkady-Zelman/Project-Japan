@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from backtest import vlstm_paths
@@ -12,7 +12,7 @@ class FakeCursor:
         self.rows: list[tuple[Any, ...]] = []
         self.queries: list[str] = []
 
-    def __enter__(self) -> "FakeCursor":
+    def __enter__(self) -> FakeCursor:
         return self
 
     def __exit__(self, *_args: object) -> None:
@@ -44,7 +44,7 @@ class FakeConnection:
     def __init__(self, cursor: FakeCursor) -> None:
         self._cursor = cursor
 
-    def __enter__(self) -> "FakeConnection":
+    def __enter__(self) -> FakeConnection:
         return self
 
     def __exit__(self, *_args: object) -> None:
@@ -55,7 +55,7 @@ class FakeConnection:
 
 
 def test_load_vlstm_paths_uses_schema_columns_and_roll_alignment(monkeypatch) -> None:
-    start = datetime(2026, 4, 1, tzinfo=timezone.utc)
+    start = datetime(2026, 4, 1, tzinfo=UTC)
     slot_starts = [start + timedelta(minutes=30 * i) for i in range(8)]
     path_rows = [
         (path_id, slot_start, float(path_id * 100 + slot_ix))
