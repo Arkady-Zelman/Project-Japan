@@ -11,7 +11,7 @@ that slot — the LSMVLSTMStrategy falls back to stack-driven forecasts.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import cast
 
 import numpy as np
@@ -67,27 +67,31 @@ def load_vlstm_paths_per_origin(
                 continue
             run_id = cast(str, row[0])
 
-            # Pull all (path_index, slot_ix, price_jpy_kwh) rows for that run.
+            # Pull forecast rows aligned to this rolling origin. The table stores
+            # absolute slot_start timestamps, not per-run slot indices.
             cur.execute(
                 """
-                select path_index, slot_ix, price_jpy_kwh
+                select path_id, slot_start, price_jpy_kwh
                 from forecast_paths
-                where run_id = %s and slot_ix < %s
+                where forecast_run_id = %s
+                  and slot_start >= %s
+                  and slot_start < %s
+                order by path_id, slot_start
                 """,
-                (run_id, H + 1),
+                (run_id, origin_ts, origin_ts + timedelta(minutes=30 * H)),
             )
             rows = cur.fetchall()
             if not rows:
                 out[i] = None
                 continue
-            # Reshape into (P, H+1).
-            max_path = max(int(r[0]) for r in rows)
-            max_slot = max(int(r[1]) for r in rows)
-            P = max_path + 1
-            S = max_slot + 1
-            mat = np.full((P, S), np.nan, dtype=np.float64)
+
+            slot_values = sorted({r[1] for r in rows})
+            slot_to_ix = {slot: ix for ix, slot in enumerate(slot_values)}
+            path_values = sorted({int(r[0]) for r in rows})
+            path_to_ix = {path_id: ix for ix, path_id in enumerate(path_values)}
+            mat = np.full((len(path_values), len(slot_values)), np.nan, dtype=np.float64)
             for r in rows:
-                mat[int(r[0]), int(r[1])] = float(r[2])
+                mat[path_to_ix[int(r[0])], slot_to_ix[r[1]]] = float(r[2])
             # Drop any path rows with NaN (incomplete).
             valid = ~np.isnan(mat).any(axis=1)
             mat = mat[valid]
