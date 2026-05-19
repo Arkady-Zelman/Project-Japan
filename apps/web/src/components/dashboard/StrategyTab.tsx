@@ -180,6 +180,11 @@ export function StrategyTab() {
             {data.asset.energy_mwh} MWh · η={data.asset.round_trip_eff.toFixed(2)}
           </div>
         )}
+        {data && data.source !== source && (
+          <div className="basis-full text-xs text-amber-600">
+            VLSTM forecast unavailable; showing realised 28-day forward proxy.
+          </div>
+        )}
       </div>
 
       {error && (
