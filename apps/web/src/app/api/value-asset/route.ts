@@ -177,9 +177,13 @@ export async function POST(request: Request) {
     .from("forecast_runs")
     .select("forecast_origin, horizon_slots")
     .eq("id", forecast_run_id)
+    .eq("area_id", area_id)
     .maybeSingle();
   if (!runMeta) {
-    return NextResponse.json({ error: "forecast_run not found" }, { status: 404 });
+    return NextResponse.json(
+      { error: "forecast_run not found for this asset area" },
+      { status: 409 },
+    );
   }
   const horizon_start = runMeta.forecast_origin;
   const horizonEndDate = new Date(

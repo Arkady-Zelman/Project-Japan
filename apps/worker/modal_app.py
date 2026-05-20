@@ -478,7 +478,7 @@ def lsm_value(payload: dict) -> dict:
     from uuid import UUID
 
     from common.sentry import init_sentry
-    from lsm.runner import mark_failed, run_valuation
+    from lsm.runner import ValuationNotQueued, mark_failed, run_valuation
 
     init_sentry()
     valuation_id_str = payload.get("valuation_id")
@@ -490,6 +490,8 @@ def lsm_value(payload: dict) -> dict:
         return {"error": f"invalid uuid: {valuation_id_str}"}
     try:
         result = run_valuation(vid)
+    except ValuationNotQueued as e:
+        return {"status": "skipped", "reason": str(e)}
     except Exception as e:
         mark_failed(vid, repr(e))
         raise
@@ -507,12 +509,14 @@ def lsm_value_run(valuation_id: str) -> dict:
     from uuid import UUID
 
     from common.sentry import init_sentry
-    from lsm.runner import mark_failed, run_valuation
+    from lsm.runner import ValuationNotQueued, mark_failed, run_valuation
 
     init_sentry()
     vid = UUID(valuation_id)
     try:
         result = run_valuation(vid)
+    except ValuationNotQueued as e:
+        return {"status": "skipped", "reason": str(e)}
     except Exception as e:
         mark_failed(vid, repr(e))
         raise

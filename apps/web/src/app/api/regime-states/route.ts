@@ -53,20 +53,36 @@ export async function GET(request: Request) {
   }
 
   const sinceIso = new Date(Date.now() - days * 86400_000).toISOString();
-  const { data: points, error } = await supabase
-    .from("regime_states")
-    .select("slot_start, p_base, p_spike, p_drop, most_likely_regime")
-    .eq("area_id", areaRow.id)
-    .eq("model_version", modelRow.version)
-    .gte("slot_start", sinceIso)
-    .order("slot_start", { ascending: true });
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  const points: {
+    slot_start: string;
+    p_base: number;
+    p_spike: number;
+    p_drop: number;
+    most_likely_regime: string;
+  }[] = [];
+  const pageSize = 1000;
+  let from = 0;
+  for (let page = 0; page < 10; page++) {
+    const { data, error } = await supabase
+      .from("regime_states")
+      .select("slot_start, p_base, p_spike, p_drop, most_likely_regime")
+      .eq("area_id", areaRow.id)
+      .eq("model_version", modelRow.version)
+      .gte("slot_start", sinceIso)
+      .order("slot_start", { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+    if (!data || data.length === 0) break;
+    points.push(...(data as typeof points));
+    if (data.length < pageSize) break;
+    from += pageSize;
   }
 
   return NextResponse.json({
     area: areaRow,
     model_version: modelRow.version,
-    points: points ?? [],
+    points,
   });
 }

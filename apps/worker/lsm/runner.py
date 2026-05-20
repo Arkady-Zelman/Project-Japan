@@ -41,6 +41,10 @@ SLOT_MINUTES = 30
 DEFAULT_HORIZON_SLOTS = 48
 
 
+class ValuationNotQueued(RuntimeError):
+    """Raised when a Modal retry hits a valuation already being/been processed."""
+
+
 def _load_queued_valuation(cur: psycopg.Cursor, valuation_id: UUID) -> dict:
     cur.execute(
         """
@@ -127,20 +131,33 @@ def _load_forecast_paths(
     rows = cur.fetchall()
     expected = horizon_slots * n_paths
     if len(rows) != expected:
-        logger.warning(
-            "forecast_paths row count %d != %d (horizon %d × paths %d)",
-            len(rows), expected, horizon_slots, n_paths,
+        raise RuntimeError(
+            "forecast_paths row count "
+            f"{len(rows)} != {expected} (horizon {horizon_slots} x paths {n_paths})"
         )
 
     # Build (n_paths, horizon_slots) price matrix in JPY/MWh.
-    slot_set: dict[datetime, int] = {}
-    paths_kwh = np.zeros((n_paths, horizon_slots), dtype=np.float64)
+    slot_starts = sorted({row[1] for row in rows})
+    if len(slot_starts) != horizon_slots:
+        raise RuntimeError(
+            f"forecast_run {forecast_run_id} is incomplete: "
+            f"{len(slot_starts)} slots for horizon {horizon_slots}"
+        )
+    slot_set: dict[datetime, int] = {
+        slot_start: idx for idx, slot_start in enumerate(slot_starts)
+    }
+    paths_kwh = np.full((n_paths, horizon_slots), np.nan, dtype=np.float64)
     for path_id, slot_start, price_kwh in rows:
-        if slot_start not in slot_set:
-            slot_set[slot_start] = len(slot_set)
+        path_idx = int(path_id)
+        if path_idx < 0 or path_idx >= n_paths:
+            raise RuntimeError(f"forecast_paths path_id {path_idx} outside n_paths={n_paths}")
         t_idx = slot_set[slot_start]
-        paths_kwh[int(path_id), t_idx] = float(price_kwh)
-    slot_starts = sorted(slot_set.keys())
+        paths_kwh[path_idx, t_idx] = float(price_kwh)
+    if np.isnan(paths_kwh).any():
+        raise RuntimeError(
+            f"forecast_run {forecast_run_id} is incomplete: "
+            f"missing one or more path/slot cells"
+        )
 
     # Engine wants prices in JPY/MWh (so cash flows are in JPY when multiplied
     # by MWh of action). forecast_paths stores JPY/kWh — multiply by 1000.
@@ -162,7 +179,9 @@ def run_valuation(valuation_id: UUID) -> ValuationResult:
             advisory_lock(cur, f"lsm_{valuation_id}")
             v = _load_queued_valuation(cur, valuation_id)
             if v["status"] != "queued":
-                logger.warning("valuation %s already in status=%s", valuation_id, v["status"])
+                raise ValuationNotQueued(
+                    f"valuation {valuation_id} already in status={v['status']}"
+                )
 
             asset = _load_asset(cur, v["asset_id"])
             paths_mwh, slot_starts = _load_forecast_paths(cur, v["forecast_run_id"])

@@ -194,9 +194,11 @@ async function buildForecastCurve(
   for (let page = 0; page < 200; page++) {
     const { data, error } = await supabase
       .from("forecast_paths")
-      .select("slot_start, price_jpy_kwh")
+      .select("slot_start, path_id, price_jpy_kwh")
       .eq("forecast_run_id", run.id)
       .lt("slot_start", horizonEnd)
+      .order("slot_start", { ascending: true })
+      .order("path_id", { ascending: true })
       .range(from, from + pageSize - 1);
     if (error || !data || data.length === 0) break;
     for (const r of data as { slot_start: string; price_jpy_kwh: number | string }[]) {
@@ -248,18 +250,28 @@ async function buildRealisedCurve(
   }
   const since = new Date(now.getTime() - REALISED_LOOKBACK_DAYS * 24 * 3600 * 1000);
 
-  const { data: rows } = await supabase
-    .from("jepx_spot_prices")
-    .select("slot_start, price_jpy_kwh")
-    .eq("area_id", area_id)
-    .eq("auction_type", "day_ahead")
-    .gte("slot_start", since.toISOString())
-    .order("slot_start", { ascending: true });
+  const rows: { slot_start: string; price_jpy_kwh: number | null }[] = [];
+  const pageSize = 1000;
+  let from = 0;
+  for (let page = 0; page < 10; page++) {
+    const { data, error } = await supabase
+      .from("jepx_spot_prices")
+      .select("slot_start, price_jpy_kwh")
+      .eq("area_id", area_id)
+      .eq("auction_type", "day_ahead")
+      .gte("slot_start", since.toISOString())
+      .order("slot_start", { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (error || !data || data.length === 0) break;
+    rows.push(...(data as { slot_start: string; price_jpy_kwh: number | null }[]));
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
   if (!rows || rows.length === 0) return [];
 
   // Bucket by (weekday, halfhour-of-day).
   const buckets = new Map<string, number[]>();
-  for (const r of rows as { slot_start: string; price_jpy_kwh: number | null }[]) {
+  for (const r of rows) {
     if (r.price_jpy_kwh == null) continue;
     const d = new Date(r.slot_start);
     const key = `${d.getUTCDay()}-${d.getUTCHours()}-${d.getUTCMinutes()}`;

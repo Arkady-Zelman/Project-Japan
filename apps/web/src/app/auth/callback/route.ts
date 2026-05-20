@@ -9,6 +9,13 @@ import { createSessionClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
+function safeNext(raw: string): string {
+  if (!raw.startsWith("/") || raw.startsWith("//")) {
+    return "/workbench";
+  }
+  return raw;
+}
+
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
@@ -26,5 +33,5 @@ export async function GET(request: Request) {
     return NextResponse.redirect(failUrl);
   }
 
-  return NextResponse.redirect(new URL(next, url.origin));
+  return NextResponse.redirect(new URL(safeNext(next), url.origin));
 }
