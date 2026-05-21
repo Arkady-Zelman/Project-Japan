@@ -71,7 +71,7 @@ const MODEL_KINDS = [
   "vlstm_train",
   "forecast_inference",
 ];
-const COMPUTE_KINDS = ["stack_build", "lsm_valuation", "backtest"];
+const COMPUTE_KINDS = ["stack_build"];
 const ALL_KINDS = [...INGEST_KINDS, ...MODEL_KINDS, ...COMPUTE_KINDS];
 
 export function DashboardClient({
@@ -256,7 +256,7 @@ export function DashboardClient({
                 />
                 <ComputeRunsTable
                   title="Compute"
-                  description="Stack build, on-demand LSM valuations, strategy backtests."
+                  description="System compute jobs safe for the public dashboard."
                   kinds={COMPUTE_KINDS}
                   initialRuns={latestRuns}
                 />

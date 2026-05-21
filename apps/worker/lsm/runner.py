@@ -127,20 +127,43 @@ def _load_forecast_paths(
     rows = cur.fetchall()
     expected = horizon_slots * n_paths
     if len(rows) != expected:
-        logger.warning(
-            "forecast_paths row count %d != %d (horizon %d × paths %d)",
-            len(rows), expected, horizon_slots, n_paths,
+        raise RuntimeError(
+            "incomplete forecast_paths for "
+            f"{forecast_run_id}: got {len(rows)} rows, expected {expected} "
+            f"(horizon {horizon_slots} x paths {n_paths})"
         )
 
     # Build (n_paths, horizon_slots) price matrix in JPY/MWh.
     slot_set: dict[datetime, int] = {}
-    paths_kwh = np.zeros((n_paths, horizon_slots), dtype=np.float64)
+    paths_kwh = np.full((n_paths, horizon_slots), np.nan, dtype=np.float64)
+    seen = np.zeros((n_paths, horizon_slots), dtype=np.bool_)
     for path_id, slot_start, price_kwh in rows:
+        p_idx = int(path_id)
+        if p_idx < 0 or p_idx >= n_paths:
+            raise RuntimeError(
+                f"forecast_paths path_id {p_idx} outside expected range 0..{n_paths - 1}"
+            )
         if slot_start not in slot_set:
             slot_set[slot_start] = len(slot_set)
+        if len(slot_set) > horizon_slots:
+            raise RuntimeError(
+                f"forecast_paths for {forecast_run_id} contain more than "
+                f"{horizon_slots} distinct slots"
+            )
         t_idx = slot_set[slot_start]
-        paths_kwh[int(path_id), t_idx] = float(price_kwh)
+        if seen[p_idx, t_idx]:
+            raise RuntimeError(
+                f"duplicate forecast_paths cell for path_id={p_idx}, slot_start={slot_start}"
+            )
+        seen[p_idx, t_idx] = True
+        paths_kwh[p_idx, t_idx] = float(price_kwh)
     slot_starts = sorted(slot_set.keys())
+    if len(slot_starts) != horizon_slots or not seen.all():
+        raise RuntimeError(
+            "forecast_paths grid is incomplete for "
+            f"{forecast_run_id}: {len(slot_starts)} slots populated, "
+            f"{int(seen.sum())}/{expected} cells present"
+        )
 
     # Engine wants prices in JPY/MWh (so cash flows are in JPY when multiplied
     # by MWh of action). forecast_paths stores JPY/kWh — multiply by 1000.

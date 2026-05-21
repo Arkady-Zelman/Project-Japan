@@ -36,8 +36,6 @@ const MODEL_KINDS = [
 
 const COMPUTE_KINDS = [
   "stack_build",
-  "lsm_valuation",
-  "backtest",
 ] as const;
 
 const TABLE_SPANS: { kind: (typeof INGEST_KINDS)[number]; table: string; column: string }[] = [
@@ -58,6 +56,7 @@ async function fetchLatestRuns(): Promise<LatestRun[]> {
     .from("compute_runs")
     .select("kind, status, created_at, duration_ms, error, output")
     .in("kind", [...ALL_KINDS])
+    .is("user_id", null)
     .order("created_at", { ascending: false })
     .limit(500);
   if (error) {
@@ -107,6 +106,7 @@ async function fetchRecentRuns(): Promise<CronRun[]> {
     .from("compute_runs")
     .select("kind, status, created_at, error")
     .in("kind", [...ALL_KINDS])
+    .is("user_id", null)
     .gte("created_at", since)
     .order("created_at", { ascending: false })
     .limit(2000);
