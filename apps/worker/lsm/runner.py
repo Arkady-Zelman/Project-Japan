@@ -41,6 +41,10 @@ SLOT_MINUTES = 30
 DEFAULT_HORIZON_SLOTS = 48
 
 
+class NonQueuedValuationError(RuntimeError):
+    """Raised when a valuation runner is asked to process a non-queued row."""
+
+
 def _load_queued_valuation(cur: psycopg.Cursor, valuation_id: UUID) -> dict:
     cur.execute(
         """
@@ -162,7 +166,9 @@ def run_valuation(valuation_id: UUID) -> ValuationResult:
             advisory_lock(cur, f"lsm_{valuation_id}")
             v = _load_queued_valuation(cur, valuation_id)
             if v["status"] != "queued":
-                logger.warning("valuation %s already in status=%s", valuation_id, v["status"])
+                raise NonQueuedValuationError(
+                    f"valuation {valuation_id} is status={v['status']}; expected queued"
+                )
 
             asset = _load_asset(cur, v["asset_id"])
             paths_mwh, slot_starts = _load_forecast_paths(cur, v["forecast_run_id"])

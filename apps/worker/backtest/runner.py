@@ -32,6 +32,10 @@ logger = logging.getLogger("backtest.runner")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 
+class NonQueuedBacktestError(RuntimeError):
+    """Raised when a backtest runner is asked to process a non-queued row."""
+
+
 def _load_backtest_row(cur: psycopg.Cursor, backtest_id: UUID) -> dict:
     cur.execute(
         """
@@ -205,6 +209,10 @@ def run_backtest(
         with connect() as conn, conn.cursor() as cur:
             advisory_lock(cur, f"backtest_{backtest_id}")
             row = _load_backtest_row(cur, backtest_id)
+            if row["status"] != "queued":
+                raise NonQueuedBacktestError(
+                    f"backtest {backtest_id} is status={row['status']}; expected queued"
+                )
             asset = _load_asset_spec(cur, row["asset_id"])
             area_id = _load_asset_area(cur, row["asset_id"])
             realised_kwh, stack_kwh, slot_starts = _load_window_prices(
