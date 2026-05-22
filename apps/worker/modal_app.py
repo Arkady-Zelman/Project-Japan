@@ -94,6 +94,295 @@ def healthcheck() -> str:
     return "ok"
 
 
+@app.function(image=base_image, cpu=2.0, timeout=1800, secrets=_secrets)
+def prune_forecast_paths(retain_latest_per_area: int = 2) -> dict:
+    """Keep only the latest N forecast_runs per area; cascade-delete the
+    rest from forecast_paths and reclaim disk via VACUUM.
+
+    1000 paths × 48 slots × 9 areas × N runs = 432K × N rows. With nothing
+    pruning, that grows ~432K/day on the Supabase free tier (500 MB). Run
+    nightly (or on-demand when disk fills) to keep the table bounded.
+    """
+    from common.db import connect
+
+    out: dict = {}
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute("select pg_size_pretty(pg_database_size(current_database()))")
+        size_row = cur.fetchone()
+        out["db_size_before"] = size_row[0] if size_row else "?"
+        cur.execute("select count(*) from forecast_paths")
+        n_row = cur.fetchone()
+        out["forecast_paths_rows_before"] = int(n_row[0]) if n_row else 0
+        cur.execute("select count(*) from forecast_runs")
+        n_runs_row = cur.fetchone()
+        out["forecast_runs_before"] = int(n_runs_row[0]) if n_runs_row else 0
+
+        # Identify runs to KEEP (latest N per area). Anything else is purged.
+        cur.execute(
+            """
+            with ranked as (
+              select id,
+                     row_number() over (partition by area_id order by forecast_origin desc) as rn
+              from forecast_runs
+            )
+            select id::text from ranked where rn > %s
+            """,
+            (retain_latest_per_area,),
+        )
+        purge_ids = [r[0] for r in cur.fetchall()]
+        out["runs_to_purge"] = len(purge_ids)
+
+        # Delete one run at a time — forecast_paths has ON DELETE CASCADE
+        # from forecast_run_id, so deleting the parent purges the child.
+        # Per-row commit keeps WAL small on a near-full disk.
+        deleted = 0
+        for run_id in purge_ids:
+            cur.execute("delete from forecast_runs where id = %s", (run_id,))
+            deleted += cur.rowcount or 0
+            conn.commit()
+        out["runs_deleted"] = deleted
+
+        # Flush any open (even read-only) transaction so we can flip
+        # autocommit — VACUUM cannot run inside a transaction block.
+        conn.commit()
+
+    # Separate connection in autocommit mode for VACUUM (not VACUUM FULL —
+    # that needs exclusive lock + temp space we don't have). Standard
+    # VACUUM marks dead rows reusable and may shrink the file tail; that's
+    # enough to unblock writes.
+    with connect() as conn2:
+        conn2.autocommit = True
+        with conn2.cursor() as cur2:
+            cur2.execute("vacuum forecast_paths")
+            cur2.execute("vacuum forecast_runs")
+
+            cur2.execute("select pg_size_pretty(pg_database_size(current_database()))")
+            r = cur2.fetchone()
+            out["db_size_after"] = r[0] if r else "?"
+            cur2.execute("select count(*) from forecast_paths")
+            r = cur2.fetchone()
+            out["forecast_paths_rows_after"] = int(r[0]) if r else 0
+
+    return out
+
+
+@app.function(image=base_image, cpu=2.0, timeout=3600, secrets=_secrets)
+def vacuum_full_tables(tables_csv: str = "") -> dict:
+    """Run VACUUM FULL on listed tables to actually reclaim disk pages
+    back to the OS. Unlike plain VACUUM, this rewrites each table file
+    compactly — needed after a big prune. Takes an exclusive lock on
+    each table for the duration, so don't run during business hours.
+
+    Usage: modal run modal_app.py::vacuum_full_tables --tables-csv \\
+                "stack_curves,stack_clearing_prices,regime_states,..."
+    Empty arg = run on the standard heavy tables.
+    """
+    from common.db import connect
+
+    if tables_csv.strip():
+        tables = [t.strip() for t in tables_csv.split(",") if t.strip()]
+    else:
+        tables = [
+            "stack_curves",
+            "stack_clearing_prices",
+            "regime_states",
+            "generation_mix_actuals",
+            "demand_actuals",
+            "jepx_spot_prices",
+            "weather_obs",
+            "forecast_paths",
+            "forecast_runs",
+        ]
+
+    out: dict = {"vacuumed": [], "failed": {}}
+    with connect() as conn:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            cur.execute("select pg_size_pretty(pg_database_size(current_database()))")
+            r = cur.fetchone()
+            out["db_size_before"] = r[0] if r else "?"
+            for table in tables:
+                try:
+                    cur.execute(f"vacuum full {table}")
+                    out["vacuumed"].append(table)
+                    print(f"  VACUUM FULL {table} ok")
+                except Exception as e:  # noqa: BLE001
+                    out["failed"][table] = str(e)
+                    print(f"  VACUUM FULL {table} failed: {e}")
+            cur.execute("select pg_size_pretty(pg_database_size(current_database()))")
+            r = cur.fetchone()
+            out["db_size_after"] = r[0] if r else "?"
+    print(f"vacuum_full_tables result: {out}")
+    return out
+
+
+@app.function(image=base_image, cpu=2.0, timeout=3600, secrets=_secrets)
+def prune_old_data() -> dict:
+    """Trim historical data the dashboard doesn't read. Run on-demand when
+    DB nears its disk limit. Retention windows are sized to the longest
+    UI surface that reads each table.
+
+    Order matters: smaller, indexed deletes first so WAL stays manageable
+    even when disk is near-full. VACUUM at the end reclaims pages.
+    """
+    from datetime import UTC, datetime, timedelta
+    from common.db import connect
+
+    now = datetime.now(tz=UTC)
+    # Time-windowed DELETE on the actuals tables (no FK cascade hazard).
+    # Order: children before parents where FKs exist.
+    time_pruned = [
+        # (table, days, filter_column)
+        ("regime_states", 30, "slot_start"),
+        ("generation_mix_actuals", 90, "slot_start"),
+        ("demand_actuals", 90, "slot_start"),
+        ("jepx_spot_prices", 90, "slot_start"),
+        ("weather_obs", 14, "ts"),
+    ]
+
+    out: dict = {"deleted": {}, "truncated": []}
+    with connect() as conn, conn.cursor() as cur:
+        # Bump statement timeout so big batch deletes don't trip Supabase's
+        # default (60s).
+        cur.execute("set local statement_timeout = '600s'")
+        conn.commit()
+
+        for table, days, col in time_pruned:
+            cutoff = now - timedelta(days=days)
+            total = 0
+            batches = 0
+            while True:
+                cur.execute(
+                    f"""
+                    delete from {table}
+                    where ctid in (
+                      select ctid from {table}
+                      where {col} < %s
+                      limit 50000
+                    )
+                    """,
+                    (cutoff,),
+                )
+                n = cur.rowcount or 0
+                conn.commit()
+                total += n
+                batches += 1
+                if n < 50000 or batches > 500:
+                    break
+            out["deleted"][table] = {"rows": total, "cutoff": cutoff.isoformat()}
+            print(f"  {table}: deleted {total} rows older than {cutoff.date()}")
+
+        # The stack pair is huge (943 MB curves + 79 MB clearing) and FK-
+        # linked. Per-row DELETE triggers an FK check on every curve row.
+        # TRUNCATE … CASCADE atomically clears both at once with no FK
+        # validation per row — far faster on this scale, at the cost of
+        # losing historical stack curves. Tomorrow's stack_run_daily
+        # repopulates the current slot; older slots are rarely viewed.
+        cur.execute("truncate table stack_curves, stack_clearing_prices restart identity cascade")
+        conn.commit()
+        out["truncated"] = ["stack_curves", "stack_clearing_prices"]
+        print("  stack_curves + stack_clearing_prices: TRUNCATED")
+
+    # VACUUM (separate autocommit connection — VACUUM can't run in a tx).
+    with connect() as conn2:
+        conn2.autocommit = True
+        with conn2.cursor() as cur2:
+            all_tables = [t for t, _, _ in time_pruned] + [
+                "stack_curves", "stack_clearing_prices",
+            ]
+            for table in all_tables:
+                try:
+                    cur2.execute(f"vacuum {table}")
+                except Exception as e:  # noqa: BLE001
+                    print(f"  vacuum {table} failed: {e}")
+            cur2.execute("select pg_size_pretty(pg_database_size(current_database()))")
+            r = cur2.fetchone()
+            out["db_size_after"] = r[0] if r else "?"
+    print(f"prune_old_data result: {out}")
+    return out
+
+
+@app.function(image=base_image, secrets=_secrets)
+def db_size() -> dict:
+    """Report DB size + top-10 tables by total size. No temp space needed."""
+    from common.db import connect
+
+    out: dict = {}
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute("select pg_size_pretty(pg_database_size(current_database()))")
+        r = cur.fetchone()
+        out["db_size"] = r[0] if r else "?"
+        cur.execute(
+            """
+            select relname,
+                   pg_size_pretty(pg_total_relation_size(c.oid)),
+                   pg_total_relation_size(c.oid)
+            from pg_class c
+            join pg_namespace n on n.oid = c.relnamespace
+            where n.nspname = 'public' and c.relkind = 'r'
+            order by pg_total_relation_size(c.oid) desc
+            limit 10
+            """
+        )
+        out["top_tables"] = [
+            {"name": row[0], "size": row[1]} for row in cur.fetchall()
+        ]
+    print(f"db_size: {out}")
+    return out
+
+
+@app.function(image=base_image, cpu=2.0, timeout=600, secrets=_secrets)
+def data_freshness() -> dict[str, dict]:
+    """One-shot diagnostic: max(slot_start) per (area, source). Run via
+    `modal run apps/worker/modal_app.py::data_freshness`."""
+    from common.db import connect
+
+    out: dict[str, dict] = {}
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute("set local statement_timeout = '300s'")
+        # Three separate queries — each scans only one table's slot_start
+        # index, which is cheap. The combined join version hits a planner
+        # timeout because each table has hundreds of thousands of rows
+        # even after pruning.
+        cur.execute(
+            """
+            select a.code, to_char(max(d.slot_start), 'YYYY-MM-DD HH24:MI')
+            from areas a left join demand_actuals d on d.area_id = a.id
+            where a.code in ('TK','HK','TH','CB','HR','KS','CG','SK','KY')
+            group by a.code
+            """
+        )
+        demand_by_code = {r[0]: r[1] for r in cur.fetchall()}
+        cur.execute(
+            """
+            select a.code, to_char(max(g.slot_start), 'YYYY-MM-DD HH24:MI')
+            from areas a left join generation_mix_actuals g on g.area_id = a.id
+            where a.code in ('TK','HK','TH','CB','HR','KS','CG','SK','KY')
+            group by a.code
+            """
+        )
+        gen_by_code = {r[0]: r[1] for r in cur.fetchall()}
+        cur.execute(
+            """
+            select a.code, to_char(max(p.slot_start), 'YYYY-MM-DD HH24:MI')
+            from areas a left join jepx_spot_prices p
+              on p.area_id = a.id and p.auction_type = 'day_ahead'
+            where a.code in ('TK','HK','TH','CB','HR','KS','CG','SK','KY')
+            group by a.code
+            """
+        )
+        price_by_code = {r[0]: r[1] for r in cur.fetchall()}
+
+    for code in sorted(set(demand_by_code) | set(gen_by_code) | set(price_by_code)):
+        out[code] = {
+            "demand": demand_by_code.get(code),
+            "gen_mix": gen_by_code.get(code),
+            "price": price_by_code.get(code),
+        }
+    print(f"data_freshness: {out}")
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Daily ingest fan-out
 # ---------------------------------------------------------------------------
@@ -230,6 +519,24 @@ def stack_run_daily() -> dict:
         out["demo_spawned"] = True
     except Exception as e:  # noqa: BLE001
         out["demo_spawned"] = f"error: {e}"
+
+    # Daily regime-state inference. Cheap (~30s), keeps the dashboard's
+    # Regime tab posteriors fresh between the weekly recalibration runs.
+    try:
+        regime_infer_daily.spawn()
+        out["regime_infer_spawned"] = True
+    except Exception as e:  # noqa: BLE001
+        out["regime_infer_spawned"] = f"error: {e}"
+
+    # Nightly retention sweep. Trims actuals to ≤90 days, regime_states to
+    # ≤30 days, weather_obs to ≤14 days, and TRUNCATEs the stack pair
+    # (rebuilt by next stack run). Keeps the Supabase free-tier disk from
+    # refilling and re-triggering the May-22 outage.
+    try:
+        prune_nightly.spawn()
+        out["prune_spawned"] = True
+    except Exception as e:  # noqa: BLE001
+        out["prune_spawned"] = f"error: {e}"
     return out
 
 
@@ -249,6 +556,29 @@ def demo_daily() -> dict:
 
     init_sentry()
     return run_demo()
+
+
+@app.function(image=base_image, cpu=2.0, timeout=600, secrets=_secrets)
+def regime_infer_daily() -> dict:
+    """Daily MRS posterior refresh. Spawned from stack_run_daily so the
+    Regime tab's posteriors stay current between the weekly recalibrations.
+    Operator can also run on demand: modal run modal_app.py::regime_infer_daily."""
+    from datetime import UTC, datetime, timedelta
+    from common.sentry import init_sentry
+    from regime.infer_state import run_all
+
+    init_sentry()
+    today = datetime.now(tz=UTC).date()
+    return run_all(today - timedelta(days=2), today + timedelta(days=1))
+
+
+@app.function(image=base_image, cpu=2.0, timeout=3600, secrets=_secrets)
+def prune_nightly() -> dict:
+    """Nightly retention sweep. Trims actuals to 90d, regime_states to 30d,
+    weather_obs to 14d; TRUNCATEs the stack pair. Same body as
+    prune_old_data — spawned from stack_run_daily.
+    """
+    return prune_old_data.local()
 
 
 @app.function(image=base_image, cpu=4.0, timeout=1800, secrets=_secrets)
