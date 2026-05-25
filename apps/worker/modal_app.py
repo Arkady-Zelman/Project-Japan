@@ -229,8 +229,8 @@ def prune_old_data() -> dict:
     from common.db import connect
 
     now = datetime.now(tz=UTC)
-    # Time-windowed DELETE on the actuals tables (no FK cascade hazard).
-    # Order: children before parents where FKs exist.
+    # Time-windowed DELETE on heavy time-series tables. Order children before
+    # parents where FKs exist.
     time_pruned = [
         # (table, days, filter_column)
         ("regime_states", 30, "slot_start"),
@@ -238,13 +238,18 @@ def prune_old_data() -> dict:
         ("demand_actuals", 90, "slot_start"),
         ("jepx_spot_prices", 90, "slot_start"),
         ("weather_obs", 14, "ts"),
+        # Keep recent stack output for the dashboard, VLSTM features, and
+        # daily regime inference. Child table first because it references
+        # stack_curves(id).
+        ("stack_clearing_prices", 90, "slot_start"),
+        ("stack_curves", 90, "slot_start"),
     ]
 
-    out: dict = {"deleted": {}, "truncated": []}
+    out: dict = {"deleted": {}}
     with connect() as conn, conn.cursor() as cur:
         # Bump statement timeout so big batch deletes don't trip Supabase's
-        # default (60s).
-        cur.execute("set local statement_timeout = '600s'")
+        # default (60s). Use session SET because each delete batch commits.
+        cur.execute("set statement_timeout = '600s'")
         conn.commit()
 
         for table, days, col in time_pruned:
@@ -272,24 +277,11 @@ def prune_old_data() -> dict:
             out["deleted"][table] = {"rows": total, "cutoff": cutoff.isoformat()}
             print(f"  {table}: deleted {total} rows older than {cutoff.date()}")
 
-        # The stack pair is huge (943 MB curves + 79 MB clearing) and FK-
-        # linked. Per-row DELETE triggers an FK check on every curve row.
-        # TRUNCATE … CASCADE atomically clears both at once with no FK
-        # validation per row — far faster on this scale, at the cost of
-        # losing historical stack curves. Tomorrow's stack_run_daily
-        # repopulates the current slot; older slots are rarely viewed.
-        cur.execute("truncate table stack_curves, stack_clearing_prices restart identity cascade")
-        conn.commit()
-        out["truncated"] = ["stack_curves", "stack_clearing_prices"]
-        print("  stack_curves + stack_clearing_prices: TRUNCATED")
-
     # VACUUM (separate autocommit connection — VACUUM can't run in a tx).
     with connect() as conn2:
         conn2.autocommit = True
         with conn2.cursor() as cur2:
-            all_tables = [t for t, _, _ in time_pruned] + [
-                "stack_curves", "stack_clearing_prices",
-            ]
+            all_tables = [t for t, _, _ in time_pruned]
             for table in all_tables:
                 try:
                     cur2.execute(f"vacuum {table}")
@@ -528,10 +520,10 @@ def stack_run_daily() -> dict:
     except Exception as e:  # noqa: BLE001
         out["regime_infer_spawned"] = f"error: {e}"
 
-    # Nightly retention sweep. Trims actuals to ≤90 days, regime_states to
-    # ≤30 days, weather_obs to ≤14 days, and TRUNCATEs the stack pair
-    # (rebuilt by next stack run). Keeps the Supabase free-tier disk from
-    # refilling and re-triggering the May-22 outage.
+    # Nightly retention sweep. Trims actuals + stack outputs to ≤90 days,
+    # regime_states to ≤30 days, and weather_obs to ≤14 days. Keeps the
+    # Supabase free-tier disk from refilling and re-triggering the May-22
+    # outage while preserving the current dashboard/regime windows.
     try:
         prune_nightly.spawn()
         out["prune_spawned"] = True
@@ -575,7 +567,7 @@ def regime_infer_daily() -> dict:
 @app.function(image=base_image, cpu=2.0, timeout=3600, secrets=_secrets)
 def prune_nightly() -> dict:
     """Nightly retention sweep. Trims actuals to 90d, regime_states to 30d,
-    weather_obs to 14d; TRUNCATEs the stack pair. Same body as
+    weather_obs to 14d, and stack outputs to 90d. Same body as
     prune_old_data — spawned from stack_run_daily.
     """
     return prune_old_data.local()
