@@ -17,7 +17,10 @@ def _time_pruned_tables(node: ast.FunctionDef) -> list[tuple[str, int, str]]:
     for child in ast.walk(node):
         if not (
             isinstance(child, ast.Assign)
-            and any(isinstance(target, ast.Name) and target.id == "time_pruned" for target in child.targets)
+            and any(
+                isinstance(target, ast.Name) and target.id == "time_pruned"
+                for target in child.targets
+            )
         ):
             continue
         return ast.literal_eval(child.value)

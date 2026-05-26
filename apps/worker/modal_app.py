@@ -225,8 +225,8 @@ def prune_old_data() -> dict:
     Order matters: smaller, indexed deletes first so WAL stays manageable
     even when disk is near-full. VACUUM at the end reclaims pages.
     """
-    from datetime import UTC, datetime, timedelta
     from common.db import connect
+    from datetime import UTC, datetime, timedelta
 
     now = datetime.now(tz=UTC)
     # Time-windowed DELETE on heavy time-series tables. Order children before
@@ -555,8 +555,8 @@ def regime_infer_daily() -> dict:
     """Daily MRS posterior refresh. Spawned from stack_run_daily so the
     Regime tab's posteriors stay current between the weekly recalibrations.
     Operator can also run on demand: modal run modal_app.py::regime_infer_daily."""
-    from datetime import UTC, datetime, timedelta
     from common.sentry import init_sentry
+    from datetime import UTC, datetime, timedelta
     from regime.infer_state import run_all
 
     init_sentry()
