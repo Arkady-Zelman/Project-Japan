@@ -228,6 +228,7 @@ def prune_old_data(confirm_destructive: bool = False) -> dict:
     even when disk is near-full. VACUUM at the end reclaims pages.
     """
     from datetime import UTC, datetime, timedelta
+
     from common.db import connect
 
     if not confirm_destructive:
@@ -574,6 +575,7 @@ def regime_infer_daily() -> dict:
     Regime tab's posteriors stay current between the weekly recalibrations.
     Operator can also run on demand: modal run modal_app.py::regime_infer_daily."""
     from datetime import UTC, datetime, timedelta
+
     from common.sentry import init_sentry
     from regime.infer_state import run_all
 

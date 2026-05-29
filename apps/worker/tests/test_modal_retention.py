@@ -10,7 +10,6 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-
 MODAL_APP = Path(__file__).resolve().parents[1] / "modal_app.py"
 SOURCE = MODAL_APP.read_text()
 TREE = ast.parse(SOURCE)
@@ -64,7 +63,9 @@ def test_destructive_prune_requires_explicit_confirmation() -> None:
     arg_names = [arg.arg for arg in node.args.args]
     assert "confirm_destructive" in arg_names
 
-    default_by_arg = dict(zip(arg_names[-len(node.args.defaults) :], node.args.defaults, strict=True))
+    default_by_arg = dict(
+        zip(arg_names[-len(node.args.defaults) :], node.args.defaults, strict=True)
+    )
     confirm_default = default_by_arg["confirm_destructive"]
     assert isinstance(confirm_default, ast.Constant)
     assert confirm_default.value is False
