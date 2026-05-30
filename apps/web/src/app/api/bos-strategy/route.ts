@@ -197,6 +197,8 @@ async function buildForecastCurve(
       .select("slot_start, price_jpy_kwh")
       .eq("forecast_run_id", run.id)
       .lt("slot_start", horizonEnd)
+      .order("slot_start", { ascending: true })
+      .order("path_id", { ascending: true })
       .range(from, from + pageSize - 1);
     if (error || !data || data.length === 0) break;
     for (const r of data as { slot_start: string; price_jpy_kwh: number | string }[]) {
