@@ -13,6 +13,8 @@ import { MetricCard } from "@/components/ui/metric-card";
 import { fuelColor } from "@/lib/fuel-colors";
 import { RegionHistoryChart } from "@/components/dashboard/RegionHistoryChart";
 import type { Metric } from "@/components/dashboard/JapanRegionalMap";
+import { useLanguage } from "@/lib/i18n/LanguageProvider";
+import type { TranslationKey } from "@/lib/i18n/dictionary";
 
 import type { RegionalBalance } from "@/app/api/regional-balance/route";
 
@@ -25,6 +27,7 @@ export function RegionDetail({
   metric: Metric;
   onClose: () => void;
 }) {
+  const { t } = useLanguage();
   const pieData = useMemo(() => {
     if (!row) return [];
     return row.generation
@@ -33,6 +36,7 @@ export function RegionDetail({
   }, [row]);
 
   if (!row) return null;
+  const localName = t(`region.${row.code}` as TranslationKey);
 
   const balanceTone =
     row.balance_pct == null
@@ -47,9 +51,10 @@ export function RegionDetail({
     <section className="mt-6 rounded-xl bg-card p-4 ring-1 ring-foreground/10">
       <header className="mb-4 flex items-baseline justify-between">
         <div>
-          <h3 className="text-xl font-semibold tracking-tight">{row.name}</h3>
+          <h3 className="text-xl font-semibold tracking-tight">{localName}</h3>
           <p className="text-xs text-muted-foreground">
-            Area <span className="font-mono">{row.code}</span> · slot{" "}
+            {t("regionDetail.areaPrefix")} <span className="font-mono">{row.code}</span> ·{" "}
+            {t("regionDetail.slotPrefix")}{" "}
             {new Date(row.slot_start).toISOString().slice(0, 16).replace("T", " ")} UTC
           </p>
         </div>
@@ -58,23 +63,23 @@ export function RegionDetail({
           onClick={onClose}
           className="rounded-md border border-foreground/10 px-2 py-1 text-xs text-muted-foreground hover:bg-muted"
         >
-          Close
+          {t("regionDetail.close")}
         </button>
       </header>
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <MetricCard
-          label="Demand"
+          label={t("regionDetail.demand")}
           value={row.demand_mw != null ? Math.round(row.demand_mw).toLocaleString() : "—"}
           unit="MW"
         />
         <MetricCard
-          label="Generation"
+          label={t("regionDetail.generation")}
           value={Math.round(row.total_gen_mw).toLocaleString()}
           unit="MW"
         />
         <MetricCard
-          label="Balance"
+          label={t("regionDetail.balance")}
           value={
             row.balance_pct != null
               ? `${row.balance_pct >= 0 ? "+" : ""}${(row.balance_pct * 100).toFixed(1)}`
@@ -84,7 +89,7 @@ export function RegionDetail({
           tone={balanceTone as "positive" | "negative" | "neutral"}
         />
         <MetricCard
-          label="JEPX day-ahead"
+          label={t("regionDetail.jepxDayAhead")}
           value={row.price_jpy_kwh != null ? row.price_jpy_kwh.toFixed(2) : "—"}
           unit="¥/kWh"
         />
@@ -118,7 +123,7 @@ export function RegionDetail({
             </ResponsiveContainer>
           ) : (
             <p className="flex h-full items-center justify-center text-sm text-muted-foreground">
-              No generation breakdown for this slot.
+              {t("regionDetail.noBreakdown")}
             </p>
           )}
         </div>
@@ -127,9 +132,9 @@ export function RegionDetail({
           <table className="w-full text-left text-sm">
             <thead className="text-xs uppercase tracking-wide text-muted-foreground">
               <tr>
-                <th className="py-1.5 pr-3 font-medium">Fuel</th>
+                <th className="py-1.5 pr-3 font-medium">{t("regionDetail.fuel")}</th>
                 <th className="py-1.5 pr-3 font-medium text-right">MW</th>
-                <th className="py-1.5 font-medium text-right">Share</th>
+                <th className="py-1.5 font-medium text-right">{t("regionDetail.share")}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-foreground/5">
@@ -173,7 +178,7 @@ export function RegionDetail({
           href={`/dashboard?tab=stack&area=${row.code}`}
           className="font-medium text-foreground hover:underline"
         >
-          See stack curve →
+          {t("regionDetail.seeStack")}
         </Link>
       </footer>
     </section>

@@ -8,8 +8,8 @@
  */
 
 import { createServerClient } from "@/lib/supabase/server";
-import { PageHeader } from "@/components/ui/page-header";
 import { BacktestResults } from "@/components/lab/BacktestResults";
+import { LabEmpty, LabHeader } from "@/components/lab/LabHeader";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -50,32 +50,12 @@ async function fetchDemoBacktestIds(): Promise<{
 export default async function LabPage() {
   const { ids, window } = await fetchDemoBacktestIds();
 
-  const windowLabel = window
-    ? `${window.start} → ${window.end}`
-    : "(no demo run yet)";
+  const windowLabel = window ? `${window.start} → ${window.end}` : null;
 
   return (
     <main className="mx-auto max-w-7xl px-6 py-12">
-      <PageHeader
-        title="Strategy lab"
-        description={
-          <>
-            Four dispatch strategies (naive spread, intrinsic, rolling
-            intrinsic, LSM) replayed daily on realised JEPX history for the
-            demo 100 MWh / 50 MW Tokyo BESS. Compare cumulative P&amp;L,
-            Sharpe, and max drawdown after slippage.{" "}
-            <span className="text-muted-foreground">Window: {windowLabel}</span>
-          </>
-        }
-      />
-      {ids.length > 0 ? (
-        <BacktestResults backtestIds={ids} />
-      ) : (
-        <p className="mt-8 text-sm text-muted-foreground">
-          The demo backtests haven&rsquo;t run yet. The first cron firing
-          after this deploy will populate them.
-        </p>
-      )}
+      <LabHeader windowLabel={windowLabel} />
+      {ids.length > 0 ? <BacktestResults backtestIds={ids} /> : <LabEmpty />}
     </main>
   );
 }

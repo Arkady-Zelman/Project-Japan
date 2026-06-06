@@ -24,19 +24,11 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { captureEvent } from "@/lib/posthog";
 import { useRealtimeForecast } from "@/hooks/useRealtimeForecast";
+import { useLanguage } from "@/lib/i18n/LanguageProvider";
+import type { TranslationKey } from "@/lib/i18n/dictionary";
 
-const AREAS = [
-  { code: "TK", name: "Tokyo" },
-  { code: "HK", name: "Hokkaido" },
-  { code: "TH", name: "Tohoku" },
-  { code: "CB", name: "Chubu" },
-  { code: "HR", name: "Hokuriku" },
-  { code: "KS", name: "Kansai" },
-  { code: "CG", name: "Chugoku" },
-  { code: "SK", name: "Shikoku" },
-  { code: "KY", name: "Kyushu" },
-] as const;
-type AreaCode = (typeof AREAS)[number]["code"];
+const AREA_CODES = ["TK", "HK", "TH", "CB", "HR", "KS", "CG", "SK", "KY"] as const;
+type AreaCode = (typeof AREA_CODES)[number];
 
 const SELECT_CLS =
   "w-full appearance-none rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring";
@@ -73,6 +65,8 @@ export function ForecastPanel() {
   const [data, setData] = useState<ForecastResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const { t, lang } = useLanguage();
+  const locale = lang === "ja" ? "ja-JP" : "en-US";
 
   // Refetch when a new forecast_run lands for this area (M10C L8).
   const realtimeTick = useRealtimeForecast(area);
@@ -145,33 +139,33 @@ export function ForecastPanel() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Section B — Forecast fan chart</CardTitle>
+        <CardTitle>{t("forecast.title")}</CardTitle>
         <CardDescription>
-          Latest VLSTM forecast: 1000 plausible price paths × 48 half-hour slots.
-          Mean line plus 5/25/75/95 percentile ribbons. Toggle the stack-modelled
-          fundamental price overlay or shade the chart by{" "}
+          {t("forecast.description.prefix")}{" "}
           <span className="font-mono">most_likely_regime</span>.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
           <div>
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">Area</label>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">
+              {t("forecast.area")}
+            </label>
             <select
               className={SELECT_CLS}
               value={area}
               onChange={(e) => setArea(e.target.value as AreaCode)}
             >
-              {AREAS.map((a) => (
-                <option key={a.code} value={a.code}>
-                  {a.name} ({a.code})
+              {AREA_CODES.map((code) => (
+                <option key={code} value={code}>
+                  {t(`region.${code}` as TranslationKey)} ({code})
                 </option>
               ))}
             </select>
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-muted-foreground">
-              Overlay stack price
+              {t("forecast.overlayStack")}
             </label>
             <label className="flex items-center gap-2 rounded-md border border-input bg-background px-3 py-1.5 text-sm">
               <input
@@ -179,12 +173,12 @@ export function ForecastPanel() {
                 checked={withStack}
                 onChange={(e) => setWithStack(e.target.checked)}
               />
-              <span>Show stack-modelled price</span>
+              <span>{t("forecast.showStack")}</span>
             </label>
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-muted-foreground">
-              Colour by regime
+              {t("forecast.colorByRegime")}
             </label>
             <label className="flex items-center gap-2 rounded-md border border-input bg-background px-3 py-1.5 text-sm">
               <input
@@ -192,7 +186,7 @@ export function ForecastPanel() {
                 checked={withRegime}
                 onChange={(e) => setWithRegime(e.target.checked)}
               />
-              <span>Shade by most-likely regime</span>
+              <span>{t("forecast.shadeByRegime")}</span>
             </label>
           </div>
         </div>
@@ -205,13 +199,18 @@ export function ForecastPanel() {
             <Skeleton className="h-[320px] w-full" />
           </div>
         )}
-        {error && <p className="text-sm text-red-600">Error: {error}</p>}
+        {error && (
+          <p className="text-sm text-red-600">
+            {t("forecast.errorPrefix")} {error}
+          </p>
+        )}
         {data?.note && <p className="text-sm text-muted-foreground">{data.note}</p>}
 
         {data?.run && (
           <div className="text-xs text-muted-foreground">
-            Origin: {new Date(data.run.forecast_origin).toLocaleString("ja-JP")} ·{" "}
-            {data.run.n_paths.toLocaleString()} paths · run id{" "}
+            {t("forecast.originPrefix")}{" "}
+            {new Date(data.run.forecast_origin).toLocaleString(locale)} ·{" "}
+            {data.run.n_paths.toLocaleString()} {t("forecast.pathsSuffix")}{" "}
             <span className="font-mono">{data.run.id.slice(0, 8)}</span>
           </div>
         )}
@@ -243,7 +242,7 @@ export function ForecastPanel() {
                     return Number.isFinite(n) ? `¥${n.toFixed(1)}` : "—";
                   }}
                   label={{
-                    value: "Price (¥/kWh)",
+                    value: t("forecast.yAxisLabel"),
                     angle: -90,
                     position: "insideLeft",
                     offset: -38,
@@ -251,7 +250,7 @@ export function ForecastPanel() {
                   }}
                 />
                 <ReTooltip
-                  labelFormatter={(t) => new Date(t as number).toLocaleString("ja-JP")}
+                  labelFormatter={(ts) => new Date(ts as number).toLocaleString(locale)}
                   formatter={(value, name) => {
                     const n = typeof value === "number" ? value : Number(value);
                     if (!Number.isFinite(n)) return ["—", String(name)];
@@ -276,7 +275,7 @@ export function ForecastPanel() {
                   fill="#3b82f6"
                   fillOpacity={0.12}
                   isAnimationActive={false}
-                  name="5–95% band"
+                  name={t("forecast.bandLabel90")}
                 />
                 {/* 25–75 ribbon */}
                 <Area
@@ -296,7 +295,7 @@ export function ForecastPanel() {
                   fill="#3b82f6"
                   fillOpacity={0.28}
                   isAnimationActive={false}
-                  name="25–75% band"
+                  name={t("forecast.bandLabel50")}
                 />
                 {/* Mean */}
                 <Line
@@ -306,7 +305,7 @@ export function ForecastPanel() {
                   strokeWidth={2}
                   dot={false}
                   isAnimationActive={false}
-                  name="Mean forecast"
+                  name={t("forecast.meanLabel")}
                 />
                 {/* Optional stack overlay */}
                 {withStack && (
@@ -318,7 +317,7 @@ export function ForecastPanel() {
                     strokeWidth={1.5}
                     dot={false}
                     isAnimationActive={false}
-                    name="Stack model"
+                    name={t("forecast.stackLabel")}
                     connectNulls
                   />
                 )}
@@ -339,12 +338,12 @@ export function ForecastPanel() {
         ) : (
           !loading && (
             <p className="text-sm text-muted-foreground">
-              No forecast paths yet. Run{" "}
+              {t("forecast.empty.prefix")}{" "}
               <span className="font-mono">python -m vlstm.forecast</span>{" "}
-              or wait for the twice-daily{" "}
+              {t("forecast.empty.middle")}{" "}
               <span className="font-mono">forecast_vlstm_morning</span> /{" "}
-              <span className="font-mono">forecast_vlstm_evening</span> cron
-              (07:00 / 22:00 JST).
+              <span className="font-mono">forecast_vlstm_evening</span>{" "}
+              {t("forecast.empty.suffix")}
             </p>
           )
         )}

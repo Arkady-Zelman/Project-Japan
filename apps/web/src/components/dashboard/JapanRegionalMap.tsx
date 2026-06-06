@@ -21,15 +21,18 @@ import {
   REGION_PATHS,
   type RegionCode,
 } from "@/lib/japan-region-paths";
+import { useLanguage } from "@/lib/i18n/LanguageProvider";
+import type { TranslationKey } from "@/lib/i18n/dictionary";
 
 import type { RegionalBalance } from "@/app/api/regional-balance/route";
 
 export type Metric = "vre_share" | "balance_pct" | "price";
 
-const METRICS: { id: Metric; label: string; help: string }[] = [
-  { id: "vre_share", label: "VRE share", help: "Share of demand met by solar, wind and hydro" },
-  { id: "balance_pct", label: "Balance", help: "(Generation − Demand) / Demand" },
-  { id: "price", label: "JEPX price", help: "Day-ahead clearing, ¥/kWh" },
+type MetricSpec = { id: Metric; labelKey: TranslationKey; helpKey: TranslationKey };
+const METRICS: MetricSpec[] = [
+  { id: "vre_share", labelKey: "map.metric.vreShare", helpKey: "map.metric.vreShare.help" },
+  { id: "balance_pct", labelKey: "map.metric.balance", helpKey: "map.metric.balance.help" },
+  { id: "price", labelKey: "map.metric.price", helpKey: "map.metric.price.help" },
 ];
 
 function lerp(a: number, b: number, t: number) {
@@ -156,6 +159,8 @@ export function JapanRegionalMap({
   const { rows, slotStart, loading, error } = useRealtimeRegionalBalance();
   const setMetric = onMetricChange;
   const [hovered, setHovered] = useState<RegionCode | null>(null);
+  const { t } = useLanguage();
+  const regionName = (code: string) => t(`region.${code}` as TranslationKey);
 
   const rowsByCode = useMemo(() => {
     const m = new Map<string, RegionalBalance>();
@@ -190,10 +195,13 @@ export function JapanRegionalMap({
     <div className="glass p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-base font-medium">Regional snapshot</h2>
+          <h2 className="text-base font-medium">{t("map.title")}</h2>
           <p className="text-xs text-muted-foreground">
-            {slotStart ? `Slot ${new Date(slotStart).toISOString().slice(0, 16).replace("T", " ")} UTC` : "—"}
-            {" · "}9 JEPX utility regions
+            {slotStart
+              ? `${t("map.slotPrefix")} ${new Date(slotStart).toISOString().slice(0, 16).replace("T", " ")} UTC`
+              : "—"}
+            {" · "}
+            {t("map.regions")}
           </p>
         </div>
         <div className="flex items-center gap-1 rounded-md bg-muted p-1">
@@ -202,14 +210,14 @@ export function JapanRegionalMap({
               key={m.id}
               type="button"
               onClick={() => setMetric(m.id)}
-              title={m.help}
+              title={t(m.helpKey)}
               className={`rounded px-2.5 py-1 text-xs font-medium transition ${
                 metric === m.id
                   ? "bg-background text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              {m.label}
+              {t(m.labelKey)}
             </button>
           ))}
         </div>
@@ -246,7 +254,7 @@ export function JapanRegionalMap({
                     onClick={() => onSelect(isSelected ? null : p.code)}
                     style={{ cursor: "pointer", transition: "stroke 120ms, stroke-width 120ms" }}
                   >
-                    <title>{`${p.name} — ${formatValue(value, metric)}`}</title>
+                    <title>{`${regionName(p.code)} — ${formatValue(value, metric)}`}</title>
                   </path>
                 );
               })}
@@ -313,14 +321,14 @@ export function JapanRegionalMap({
             return (
               <div
                 onClick={() => onSelect(isSelected ? null : "KY")}
-                title="Okinawa (part of Kyushu / KY)"
+                title={`${t("map.okinawa")} (${t("map.okinawa.partOfKy")})`}
                 className="absolute bottom-1 left-1 w-[156px] cursor-pointer rounded-[10px] bg-[linear-gradient(180deg,rgba(255,255,255,0.10)_0%,rgba(255,255,255,0.03)_40%,transparent_70%),rgba(28,30,38,0.45)] px-2 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.16),inset_0_0_0_1px_rgba(255,255,255,0.10)] backdrop-blur-[20px] backdrop-saturate-[1.4]"
               >
                 <div className="mb-0.5 flex items-baseline justify-between">
                   <span className="text-[9.5px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-                    Okinawa
+                    {t("map.okinawa")}
                   </span>
-                  <span className="text-[10px] text-muted-foreground">part of KY</span>
+                  <span className="text-[10px] text-muted-foreground">{t("map.okinawa.partOfKy")}</span>
                 </div>
                 <svg
                   viewBox="115 645 130 85"
@@ -362,7 +370,7 @@ export function JapanRegionalMap({
                     className="inline-block size-3 rounded-sm ring-1 ring-foreground/10"
                     style={{ backgroundColor: fill }}
                   />
-                  <span className="flex-1 truncate font-medium">{p.name}</span>
+                  <span className="flex-1 truncate font-medium">{regionName(p.code)}</span>
                   <span className="font-mono text-xs text-muted-foreground">
                     {formatValue(value, metric)}
                   </span>
@@ -379,12 +387,13 @@ export function JapanRegionalMap({
 }
 
 function Legend({ metric, vMin, vMax }: { metric: Metric; vMin: number; vMax: number }) {
+  const { t } = useLanguage();
   const stops =
     metric === "balance_pct"
       ? [
-          { c: lerpRgb(NEUTRAL, RED, 1), label: "Deficit" },
-          { c: lerpRgb(NEUTRAL, NEUTRAL, 0), label: "Balanced" },
-          { c: lerpRgb(NEUTRAL, GREEN, 1), label: "Surplus" },
+          { c: lerpRgb(NEUTRAL, RED, 1), label: t("map.legend.deficit") },
+          { c: lerpRgb(NEUTRAL, NEUTRAL, 0), label: t("map.legend.balanced") },
+          { c: lerpRgb(NEUTRAL, GREEN, 1), label: t("map.legend.surplus") },
         ]
       : metric === "vre_share"
         ? [
@@ -399,7 +408,7 @@ function Legend({ metric, vMin, vMax }: { metric: Metric; vMin: number; vMax: nu
           ];
   return (
     <div className="mt-4 flex items-center gap-3 text-xs text-muted-foreground">
-      <span>Legend</span>
+      <span>{t("map.legend")}</span>
       <div className="flex items-center gap-1.5">
         {stops.map((s, i) => (
           <span key={i} className="inline-flex items-center gap-1">

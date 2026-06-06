@@ -9,8 +9,8 @@
  */
 
 import { createServerClient } from "@/lib/supabase/server";
-import { PageHeader } from "@/components/ui/page-header";
 import { ValuationResults } from "@/components/workbench/ValuationResults";
+import { WorkbenchEmpty, WorkbenchHeader } from "@/components/workbench/WorkbenchHeader";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -33,25 +33,8 @@ export default async function WorkbenchPage() {
 
   return (
     <main className="mx-auto max-w-7xl px-6 py-12">
-      <PageHeader
-        title="Workbench"
-        description={
-          <>
-            Daily Boogert &amp; de Jong Least-Squares Monte Carlo valuation of
-            a 100 MWh / 50 MW Tokyo BESS against the latest VLSTM forecast
-            paths. Refreshes automatically every morning at 06:30 JST after
-            the day&rsquo;s ingest + stack build complete.
-          </>
-        }
-      />
-      {valuationId ? (
-        <ValuationResults valuationId={valuationId} />
-      ) : (
-        <p className="mt-8 text-sm text-muted-foreground">
-          The demo valuation hasn&rsquo;t run yet. The first cron firing
-          after this deploy will populate it.
-        </p>
-      )}
+      <WorkbenchHeader />
+      {valuationId ? <ValuationResults valuationId={valuationId} /> : <WorkbenchEmpty />}
     </main>
   );
 }

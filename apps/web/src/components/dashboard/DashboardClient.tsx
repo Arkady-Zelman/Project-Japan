@@ -28,6 +28,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { TabBar, type TabBarItem } from "@/components/ui/tab-bar";
 import { useRealtimeRegionalBalance } from "@/hooks/useRealtimeRegionalBalance";
 import type { RegionCode } from "@/lib/japan-region-paths";
+import { useLanguage } from "@/lib/i18n/LanguageProvider";
 
 import type { DataSpan, LatestRun } from "@/components/dashboard/types";
 
@@ -45,15 +46,6 @@ const RegimePanel = dynamic(
 );
 
 type TabId = "map" | "strategy" | "forecast" | "stack" | "regime" | "health";
-
-const TABS: ReadonlyArray<TabBarItem<TabId>> = [
-  { value: "map", label: "Map" },
-  { value: "strategy", label: "Strategy" },
-  { value: "forecast", label: "Forecast" },
-  { value: "stack", label: "Stack" },
-  { value: "regime", label: "Regime" },
-  { value: "health", label: "Health" },
-];
 
 const INGEST_KINDS = [
   "ingest_jepx_prices",
@@ -85,6 +77,19 @@ export function DashboardClient({
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { t } = useLanguage();
+
+  const TABS: ReadonlyArray<TabBarItem<TabId>> = useMemo(
+    () => [
+      { value: "map", label: t("tab.map") },
+      { value: "strategy", label: t("tab.strategy") },
+      { value: "forecast", label: t("tab.forecast") },
+      { value: "stack", label: t("tab.stack") },
+      { value: "regime", label: t("tab.regime") },
+      { value: "health", label: t("tab.health") },
+    ],
+    [t],
+  );
 
   const tab = (searchParams.get("tab") ?? "map") as TabId;
   const areaParam = searchParams.get("area");
@@ -138,13 +143,13 @@ export function DashboardClient({
   return (
     <main className="mx-auto w-full max-w-[1600px] px-6 py-10">
       <PageHeader
-        title="Japan power dashboard"
-        description="Half-hourly snapshots of demand, generation mix, and JEPX clearing across the 9 utility regions. Forecasts, stack model, and pipeline health under the tabs."
+        title={t("dashboard.title")}
+        description={t("dashboard.description")}
         actions={
           <>
             <span className="text-xs text-muted-foreground">
               {fetchedAt
-                ? `Updated ${fetchedAt.toISOString().slice(11, 19)} UTC`
+                ? `${t("dashboard.updatedPrefix")} ${fetchedAt.toISOString().slice(11, 19)} UTC`
                 : "—"}
             </span>
             <button
@@ -154,7 +159,7 @@ export function DashboardClient({
               className="inline-flex items-center gap-1 rounded-md border border-foreground/10 px-2 py-1 text-xs text-muted-foreground hover:bg-muted disabled:opacity-50"
             >
               <span className={loading ? "inline-block animate-spin" : "inline-block"}>↻</span>
-              <span>Refresh</span>
+              <span>{t("dashboard.refresh")}</span>
             </button>
             <span
               className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${
@@ -178,31 +183,37 @@ export function DashboardClient({
                         : "bg-emerald-500"
                 }`}
               />
-              {error ? "Error" : loading ? "Syncing" : rows.length === 0 ? "No data" : "Live"}
+              {error
+                ? t("dashboard.status.error")
+                : loading
+                  ? t("dashboard.status.syncing")
+                  : rows.length === 0
+                    ? t("dashboard.status.noData")
+                    : t("dashboard.status.live")}
             </span>
           </>
         }
         metrics={
           <>
             <MetricCard
-              label="System demand"
+              label={t("dashboard.metric.systemDemand")}
               value={systemTotals.totalDemand > 0 ? Math.round(systemTotals.totalDemand).toLocaleString() : "—"}
               unit="MW"
               hint={slotStart ? new Date(slotStart).toISOString().slice(0, 16).replace("T", " ") + " UTC" : undefined}
             />
             <MetricCard
-              label="System generation"
+              label={t("dashboard.metric.systemGen")}
               value={systemTotals.totalGen > 0 ? Math.round(systemTotals.totalGen).toLocaleString() : "—"}
               unit="MW"
             />
             <MetricCard
-              label="System VRE share"
+              label={t("dashboard.metric.systemVre")}
               value={(systemTotals.sysVreShare * 100).toFixed(0)}
               unit="%"
               tone="positive"
             />
             <MetricCard
-              label="Tokyo JEPX"
+              label={t("dashboard.metric.tokyoJepx")}
               value={systemTotals.tokyoPrice != null ? systemTotals.tokyoPrice.toFixed(2) : "—"}
               unit="¥/kWh"
             />
@@ -212,7 +223,7 @@ export function DashboardClient({
 
       {error && (
         <div className="mb-4 rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2 text-sm text-red-500">
-          Regional balance fetch failed: {error}
+          {t("dashboard.fetchFailed")} {error}
         </div>
       )}
 
@@ -242,21 +253,21 @@ export function DashboardClient({
               <div className="space-y-6">
                 <CronHealthStrip runs={recentRuns} kinds={ALL_KINDS} />
                 <ComputeRunsTable
-                  title="Ingest"
-                  description="Daily ingest pipeline: market, demand, generation mix, weather, FX, fuel, holidays."
+                  title={t("compute.ingest")}
+                  description={t("compute.ingest.description")}
                   kinds={INGEST_KINDS}
                   initialRuns={latestRuns}
                   dataSpans={dataSpans}
                 />
                 <ComputeRunsTable
-                  title="Models"
-                  description="Regime calibration, VLSTM training, twice-daily forecast inference."
+                  title={t("compute.models")}
+                  description={t("compute.models.description")}
                   kinds={MODEL_KINDS}
                   initialRuns={latestRuns}
                 />
                 <ComputeRunsTable
-                  title="Compute"
-                  description="Stack build, on-demand LSM valuations, strategy backtests."
+                  title={t("compute.compute")}
+                  description={t("compute.compute.description")}
                   kinds={COMPUTE_KINDS}
                   initialRuns={latestRuns}
                 />

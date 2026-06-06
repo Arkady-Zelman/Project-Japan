@@ -15,6 +15,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { useLanguage } from "@/lib/i18n/LanguageProvider";
 
 export type CronRun = {
   kind: string;
@@ -52,6 +53,7 @@ function buildLastNDays(n: number): string[] {
 export function CronHealthStrip({ runs, kinds }: Props) {
   const [open, setOpen] = useState<DayCell | null>(null);
   const days = useMemo(() => buildLastNDays(7), []);
+  const { t } = useLanguage();
   const byKindDay = useMemo(() => {
     const m = new Map<string, Map<string, CronRun>>();
     for (const r of runs) {
@@ -70,16 +72,14 @@ export function CronHealthStrip({ runs, kinds }: Props) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Cron health (7 days)</CardTitle>
-        <CardDescription>
-          Per-kind status for each of the last 7 days. Click a red square to see the error.
-        </CardDescription>
+        <CardTitle>{t("cron.title")}</CardTitle>
+        <CardDescription>{t("cron.description")}</CardDescription>
       </CardHeader>
       <CardContent className="overflow-x-auto p-0">
         <table className="w-full text-left text-xs">
           <thead className="bg-neutral-50 text-xs uppercase tracking-wide text-neutral-500 dark:bg-neutral-900/50 dark:text-neutral-400">
             <tr>
-              <th className="px-4 py-2 font-medium">Kind</th>
+              <th className="px-4 py-2 font-medium">{t("cron.kind")}</th>
               {days.map((d) => (
                 <th key={d} className="px-2 py-2 font-mono text-[10px]">
                   {d.slice(5)}
@@ -134,17 +134,17 @@ export function CronHealthStrip({ runs, kinds }: Props) {
         {open && (
           <div className="border-t border-neutral-200 bg-neutral-50 p-4 text-xs dark:border-neutral-800 dark:bg-neutral-900">
             <div className="mb-1 font-medium text-red-700 dark:text-red-300">
-              Failed on {open.date}
+              {t("cron.failedOn")} {open.date}
             </div>
             <pre className="overflow-x-auto whitespace-pre-wrap text-neutral-700 dark:text-neutral-300">
-              {open.error ?? "(no error message)"}
+              {open.error ?? t("cron.noError")}
             </pre>
             <button
               type="button"
               onClick={() => setOpen(null)}
               className="mt-2 rounded border border-neutral-300 px-2 py-0.5 text-xs hover:bg-neutral-100 dark:border-neutral-700"
             >
-              Close
+              {t("cron.close")}
             </button>
           </div>
         )}

@@ -27,6 +27,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { MetricCard } from "@/components/ui/metric-card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useLanguage } from "@/lib/i18n/LanguageProvider";
 
 type Forecast = "forecast" | "realised";
 
@@ -94,6 +95,7 @@ export function StrategyTab() {
   const [data, setData] = useState<BoSResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { t } = useLanguage();
 
   const fetchBos = useCallback(async () => {
     setLoading(true);
@@ -118,20 +120,14 @@ export function StrategyTab() {
   return (
     <div className="space-y-6">
       <header className="space-y-2">
-        <h2 className="text-xl font-semibold tracking-tight">Basket of Spreads</h2>
-        <p className="max-w-3xl text-sm text-muted-foreground">
-          Decomposes storage value into a portfolio of calendar spread options on the slot
-          forwards (one CSO per charge → discharge pair). Adapted from Baker/O&apos;Brien/Ogden/
-          Strickland, &ldquo;Gas storage valuation strategies&rdquo;, Risk.net Nov 2017. Built greedy in
-          spread value under power + inventory constraints; extrinsic value layered via
-          Bachelier at-the-money approximation.
-        </p>
+        <h2 className="text-xl font-semibold tracking-tight">{t("strategy.title")}</h2>
+        <p className="max-w-3xl text-sm text-muted-foreground">{t("strategy.description")}</p>
       </header>
 
       <div className="flex flex-wrap items-end gap-3 rounded-xl bg-card p-4 ring-1 ring-foreground/10">
         <div>
           <label className="mb-1 block text-xs uppercase tracking-wide text-muted-foreground">
-            Forward curve source
+            {t("strategy.forwardSource")}
           </label>
           <div className="flex items-center gap-1 rounded-md bg-muted p-1">
             {(["forecast", "realised"] as const).map((s) => (
@@ -145,24 +141,24 @@ export function StrategyTab() {
                     : "text-muted-foreground hover:text-foreground"
                 }`}
               >
-                {s === "forecast" ? "VLSTM forecast" : "Realised (28d)"}
+                {s === "forecast" ? t("strategy.source.forecast") : t("strategy.source.realised")}
               </button>
             ))}
           </div>
         </div>
         <div>
           <label className="mb-1 block text-xs uppercase tracking-wide text-muted-foreground">
-            Horizon
+            {t("strategy.horizon")}
           </label>
           <select
             value={horizon}
             onChange={(e) => setHorizon(Number(e.target.value))}
             className="rounded-md border border-foreground/10 bg-background px-3 py-1.5 text-sm"
           >
-            <option value={48}>1 day (48 slots)</option>
-            <option value={96}>2 days</option>
-            <option value={168}>3.5 days</option>
-            <option value={336}>7 days</option>
+            <option value={48}>{t("strategy.horizon.1day")}</option>
+            <option value={96}>{t("strategy.horizon.2days")}</option>
+            <option value={168}>{t("strategy.horizon.3_5days")}</option>
+            <option value={336}>{t("strategy.horizon.7days")}</option>
           </select>
         </div>
         <button
@@ -171,7 +167,7 @@ export function StrategyTab() {
           disabled={loading}
           className="rounded-md border border-foreground/10 px-3 py-1.5 text-xs hover:bg-muted disabled:opacity-50"
         >
-          {loading ? "Computing…" : "Recompute"}
+          {loading ? t("strategy.computing") : t("strategy.recompute")}
         </button>
         {data?.asset && (
           <div className="ml-auto text-xs text-muted-foreground">
@@ -207,15 +203,15 @@ export function StrategyTab() {
 
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
             <MetricCard
-              label="BoS total value"
+              label={t("strategy.metric.bosTotalValue")}
               value={fmtJpy(data.total_value_jpy)}
-              hint={`across ${data.basket.length} CSOs`}
+              hint={t("strategy.metric.bosTotalValue.hint", { n: data.basket.length })}
               tone="positive"
             />
-            <MetricCard label="Intrinsic" value={fmtJpy(data.total_intrinsic_jpy)} />
-            <MetricCard label="Extrinsic" value={fmtJpy(data.total_extrinsic_jpy)} />
+            <MetricCard label={t("strategy.metric.intrinsic")} value={fmtJpy(data.total_intrinsic_jpy)} />
+            <MetricCard label={t("strategy.metric.extrinsic")} value={fmtJpy(data.total_extrinsic_jpy)} />
             <MetricCard
-              label="Per kWh of capacity"
+              label={t("strategy.metric.perKwh")}
               value={
                 data.asset.energy_mwh > 0
                   ? fmtJpy(data.total_value_jpy / (data.asset.energy_mwh * 1000))
@@ -264,6 +260,7 @@ function buildSlotLabeler(tradeable: { ts: string }[]): (ts: string) => string {
 }
 
 function PhysicalProfile({ data }: { data: BoSResponse }) {
+  const { t } = useLanguage();
   const dtHours = data.dt_hours ?? 0.5;
   const labeler = useMemo(() => buildSlotLabeler(data.tradeable), [data.tradeable]);
   const chartData = useMemo(() => {
@@ -290,10 +287,12 @@ function PhysicalProfile({ data }: { data: BoSResponse }) {
 
   return (
     <div className="rounded-xl bg-card p-4 ring-1 ring-foreground/10">
-      <h3 className="mb-1 text-base font-medium">Physical profile</h3>
+      <h3 className="mb-1 text-base font-medium">{t("strategy.physical.title")}</h3>
       <p className="mb-3 text-xs text-muted-foreground">
-        Half-hourly charge (green, up) / discharge (red, down) and running inventory (blue line) over
-        the {dtHours === 0.5 ? `${data.tradeable.length / 2}-hour` : `${data.tradeable.length}-slot`} horizon.
+        {t("strategy.physical.description")}{" "}
+        <span className="text-muted-foreground">
+          ({dtHours === 0.5 ? `${data.tradeable.length / 2}h` : `${data.tradeable.length} slots`})
+        </span>
       </p>
       <div className="h-[320px] w-full">
         <ResponsiveContainer width="100%" height="100%">
@@ -318,16 +317,17 @@ function PhysicalProfile({ data }: { data: BoSResponse }) {
               formatter={(v, name) => {
                 const n = Number(v);
                 if (!Number.isFinite(n)) return ["—", String(name)];
-                if (name === "Inventory") return [`${n.toFixed(1)} MWh`, name];
+                if (name === t("strategy.chartLabel.inventory"))
+                  return [`${n.toFixed(1)} MWh`, name];
                 return [`${Math.abs(n).toFixed(1)} MWh`, String(name)];
               }}
             />
-            <Bar dataKey="charge" name="Charge" fill="#22c55e" isAnimationActive={false} />
-            <Bar dataKey="discharge" name="Discharge" fill="#dc2626" isAnimationActive={false} />
+            <Bar dataKey="charge" name={t("strategy.chartLabel.charge")} fill="#22c55e" isAnimationActive={false} />
+            <Bar dataKey="discharge" name={t("strategy.chartLabel.discharge")} fill="#dc2626" isAnimationActive={false} />
             <Line
               type="monotone"
               dataKey="inventory"
-              name="Inventory"
+              name={t("strategy.chartLabel.inventory")}
               stroke="#1d4ed8"
               strokeWidth={2}
               dot={false}
@@ -341,6 +341,7 @@ function PhysicalProfile({ data }: { data: BoSResponse }) {
 }
 
 function ExpectedPnL({ data }: { data: BoSResponse }) {
+  const { t } = useLanguage();
   const labeler = useMemo(() => buildSlotLabeler(data.tradeable), [data.tradeable]);
   const chartData = useMemo(() => {
     let cum = 0;
@@ -371,28 +372,24 @@ function ExpectedPnL({ data }: { data: BoSResponse }) {
     <div className="rounded-xl bg-card p-4 ring-1 ring-foreground/10">
       <header className="mb-3 flex flex-wrap items-baseline justify-between gap-3">
         <div>
-          <h3 className="text-base font-medium">Expected P&amp;L over time</h3>
-          <p className="text-xs text-muted-foreground">
-            Cumulative cashflow while executing the basket against the forward curve.
-            Down-slopes are charge slots (paying for energy); up-slopes are discharge
-            slots (revenue).
-          </p>
+          <h3 className="text-base font-medium">{t("strategy.pnl.title")}</h3>
+          <p className="text-xs text-muted-foreground">{t("strategy.pnl.description")}</p>
         </div>
         <div className="flex flex-wrap items-center gap-4 text-xs">
           <span>
-            Charge spend{" "}
+            {t("strategy.pnl.chargeSpend")}{" "}
             <span className="font-mono text-red-400">
               {fmtJpy(Math.abs(final?.cum_charge_cost ?? 0))}
             </span>
           </span>
           <span>
-            Discharge revenue{" "}
+            {t("strategy.pnl.dischargeRevenue")}{" "}
             <span className="font-mono text-emerald-400">
               {fmtJpy(final?.cum_discharge_rev ?? 0)}
             </span>
           </span>
           <span>
-            Final P&amp;L{" "}
+            {t("strategy.pnl.finalPnl")}{" "}
             <span className="font-mono font-semibold text-foreground">
               {fmtJpy(final?.cum_pnl ?? 0)}
             </span>
@@ -435,7 +432,7 @@ function ExpectedPnL({ data }: { data: BoSResponse }) {
             <Line
               type="monotone"
               dataKey="cum_pnl"
-              name="Cumulative P&L"
+              name={t("strategy.pnl.cumulative")}
               stroke="#1d4ed8"
               strokeWidth={2}
               dot={false}
@@ -444,7 +441,7 @@ function ExpectedPnL({ data }: { data: BoSResponse }) {
             <Line
               type="monotone"
               dataKey="cum_discharge_rev"
-              name="Cum. discharge revenue"
+              name={t("strategy.pnl.cumDischarge")}
               stroke="#22c55e"
               strokeWidth={1.5}
               strokeDasharray="3 3"
@@ -454,7 +451,7 @@ function ExpectedPnL({ data }: { data: BoSResponse }) {
             <Line
               type="monotone"
               dataKey="cum_charge_cost"
-              name="Cum. charge spend"
+              name={t("strategy.pnl.cumCharge")}
               stroke="#dc2626"
               strokeWidth={1.5}
               strokeDasharray="3 3"
@@ -466,19 +463,19 @@ function ExpectedPnL({ data }: { data: BoSResponse }) {
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
         <span className="inline-flex items-center gap-1.5">
-          <span className="inline-block h-0.5 w-4 bg-[#1d4ed8]" /> Cumulative P&amp;L
+          <span className="inline-block h-0.5 w-4 bg-[#1d4ed8]" /> {t("strategy.pnl.cumulative")}
         </span>
         <span className="inline-flex items-center gap-1.5">
           <span className="inline-block h-0.5 w-4 border-t border-dashed border-[#22c55e]" />{" "}
-          Cum. discharge revenue
+          {t("strategy.pnl.cumDischarge")}
         </span>
         <span className="inline-flex items-center gap-1.5">
           <span className="inline-block h-0.5 w-4 border-t border-dashed border-[#dc2626]" />{" "}
-          Cum. charge spend (negative)
+          {t("strategy.pnl.cumCharge")}
         </span>
         <span className="ml-auto">
-          Intrinsic target {fmtJpy(data.total_intrinsic_jpy)} · BoS total{" "}
-          {fmtJpy(data.total_value_jpy)}
+          {t("strategy.pnl.intrinsicTarget")} {fmtJpy(data.total_intrinsic_jpy)} ·{" "}
+          {t("strategy.pnl.bosTotal")} {fmtJpy(data.total_value_jpy)}
         </span>
       </div>
     </div>
@@ -490,6 +487,7 @@ function ExpectedPnL({ data }: { data: BoSResponse }) {
  * Each cell = one half-hour slot, coloured by what the basket says to do.
  */
 function ScheduleSummary({ data }: { data: BoSResponse }) {
+  const { t } = useLanguage();
   const slots = data.tradeable;
   if (slots.length === 0) return null;
 
@@ -560,33 +558,41 @@ function ScheduleSummary({ data }: { data: BoSResponse }) {
     <section className="rounded-xl bg-card p-4 ring-1 ring-foreground/10">
       <header className="mb-3 flex items-start justify-between gap-4">
         <div>
-          <h3 className="text-base font-medium">Today&apos;s schedule</h3>
-          <p className="text-xs text-muted-foreground">
-            Action implied by the optimal basket at each half-hour slot.
-          </p>
+          <h3 className="text-base font-medium">{t("strategy.schedule.title")}</h3>
+          <p className="text-xs text-muted-foreground">{t("strategy.schedule.description")}</p>
         </div>
         <div className="flex items-center gap-3 text-xs">
           <span className="inline-flex items-center gap-1.5">
-            <span className="inline-block size-2.5 rounded-sm bg-emerald-500" /> Charge
+            <span className="inline-block size-2.5 rounded-sm bg-emerald-500" />{" "}
+            {t("strategy.action.charge")}
           </span>
           <span className="inline-flex items-center gap-1.5">
-            <span className="inline-block size-2.5 rounded-sm bg-red-500" /> Discharge
+            <span className="inline-block size-2.5 rounded-sm bg-red-500" />{" "}
+            {t("strategy.action.discharge")}
           </span>
           <span className="inline-flex items-center gap-1.5">
-            <span className="inline-block size-2.5 rounded-sm bg-neutral-700" /> Idle
+            <span className="inline-block size-2.5 rounded-sm bg-neutral-700" />{" "}
+            {t("strategy.action.idle")}
           </span>
         </div>
       </header>
 
       <p className="mb-3 text-sm leading-relaxed">
-        Charge <span className="font-semibold text-emerald-400">{totalCharge.toFixed(1)} MWh</span>{" "}
-        in {chargeWindows.length} window{chargeWindows.length === 1 ? "" : "s"} at average{" "}
-        <span className="font-mono">¥{avgChargePrice.toFixed(2)}/kWh</span>; discharge{" "}
-        <span className="font-semibold text-red-400">{totalDischarge.toFixed(1)} MWh</span> in{" "}
-        {dischargeWindows.length} window{dischargeWindows.length === 1 ? "" : "s"} at average{" "}
-        <span className="font-mono">¥{avgDischargePrice.toFixed(2)}/kWh</span>. Peak inventory{" "}
+        {t("strategy.action.charge")}{" "}
+        <span className="font-semibold text-emerald-400">{totalCharge.toFixed(1)} MWh</span>{" "}
+        ({chargeWindows.length}{" "}
+        {chargeWindows.length === 1 ? t("strategy.window") : t("strategy.windows")},{" "}
+        {t("strategy.chargeAvg")}{" "}
+        <span className="font-mono">¥{avgChargePrice.toFixed(2)}/kWh</span>);{" "}
+        {t("strategy.action.discharge")}{" "}
+        <span className="font-semibold text-red-400">{totalDischarge.toFixed(1)} MWh</span> ({dischargeWindows.length}{" "}
+        {dischargeWindows.length === 1 ? t("strategy.window") : t("strategy.windows")},{" "}
+        {t("strategy.chargeAvg")}{" "}
+        <span className="font-mono">¥{avgDischargePrice.toFixed(2)}/kWh</span>).{" "}
+        {t("strategy.peakInventory")}{" "}
         <span className="font-semibold">{peakInv.toFixed(1)} MWh</span> ({((peakInv / data.asset.energy_mwh) * 100).toFixed(0)}% SoC) ·{" "}
-        {cycles.toFixed(2)} full cycle{cycles >= 1.5 || cycles < 0.5 ? "s" : ""}.
+        {cycles.toFixed(2)}{" "}
+        {cycles >= 1.5 || cycles < 0.5 ? t("strategy.fullCyclesPlural") : t("strategy.fullCycles")}.
       </p>
 
       {/* Colour-coded timeline strip */}
@@ -599,10 +605,16 @@ function ScheduleSummary({ data }: { data: BoSResponse }) {
                 : s.net_position_mwh < -1e-6
                   ? "bg-red-500"
                   : "bg-neutral-800";
+            const actionLabel =
+              s.net_position_mwh > 0
+                ? t("strategy.action.charge")
+                : s.net_position_mwh < 0
+                  ? t("strategy.action.discharge")
+                  : t("strategy.action.idle");
             return (
               <div
                 key={i}
-                title={`${fmtHHMM(s.ts)} · ${s.net_position_mwh > 0 ? "charge" : s.net_position_mwh < 0 ? "discharge" : "idle"} ${Math.abs(s.net_position_mwh).toFixed(1)} MWh · forward ¥${s.forward_price.toFixed(2)}/kWh`}
+                title={`${fmtHHMM(s.ts)} · ${actionLabel} ${Math.abs(s.net_position_mwh).toFixed(1)} MWh · ¥${s.forward_price.toFixed(2)}/kWh`}
                 className={`${c} h-full`}
                 style={{ width: `${100 / totalDuration}%` }}
               />
@@ -635,7 +647,9 @@ function ScheduleSummary({ data }: { data: BoSResponse }) {
                   w.kind === "charge" ? "bg-emerald-500" : "bg-red-500"
                 }`}
               />
-              <span className="font-medium capitalize">{w.kind}</span>
+              <span className="font-medium">
+                {w.kind === "charge" ? t("strategy.action.charge") : t("strategy.action.discharge")}
+              </span>
               <span className="font-mono">
                 {fmtHHMM(w.from)}–{fmtHHMM(w.to)}
               </span>
@@ -648,29 +662,26 @@ function ScheduleSummary({ data }: { data: BoSResponse }) {
 }
 
 function BasketTable({ basket }: { basket: CSO[] }) {
+  const { t } = useLanguage();
   return (
     <div className="rounded-xl bg-card p-4 ring-1 ring-foreground/10">
-      <h3 className="mb-1 text-base font-medium">Basket composition</h3>
-      <p className="mb-3 text-xs text-muted-foreground">
-        Optimal CSO portfolio sorted by total value (intrinsic + extrinsic). Each row pairs
-        a charge slot with a discharge slot at the volume that maximises value without
-        violating power-rate or capacity constraints.
-      </p>
+      <h3 className="mb-1 text-base font-medium">{t("strategy.basket.title")}</h3>
+      <p className="mb-3 text-xs text-muted-foreground">{t("strategy.basket.description")}</p>
       {basket.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No profitable spreads in this horizon.</p>
+        <p className="text-sm text-muted-foreground">{t("strategy.basket.empty")}</p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead className="text-muted-foreground">
               <tr>
-                <th className="py-1.5 pr-3 font-medium">Charge slot</th>
-                <th className="py-1.5 pr-3 font-medium">Discharge slot</th>
-                <th className="py-1.5 pr-3 font-medium text-right">Volume (MWh)</th>
-                <th className="py-1.5 pr-3 font-medium text-right">Spread (¥/kWh)</th>
-                <th className="py-1.5 pr-3 font-medium text-right">σ_spread (¥/kWh)</th>
-                <th className="py-1.5 pr-3 font-medium text-right">Intrinsic</th>
-                <th className="py-1.5 pr-3 font-medium text-right">Extrinsic</th>
-                <th className="py-1.5 font-medium text-right">Total</th>
+                <th className="py-1.5 pr-3 font-medium">{t("strategy.basket.chargeSlot")}</th>
+                <th className="py-1.5 pr-3 font-medium">{t("strategy.basket.dischargeSlot")}</th>
+                <th className="py-1.5 pr-3 font-medium text-right">{t("strategy.basket.volume")}</th>
+                <th className="py-1.5 pr-3 font-medium text-right">{t("strategy.basket.spread")}</th>
+                <th className="py-1.5 pr-3 font-medium text-right">{t("strategy.basket.spreadVol")}</th>
+                <th className="py-1.5 pr-3 font-medium text-right">{t("strategy.metric.intrinsic")}</th>
+                <th className="py-1.5 pr-3 font-medium text-right">{t("strategy.metric.extrinsic")}</th>
+                <th className="py-1.5 font-medium text-right">{t("strategy.basket.totalCol")}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-foreground/5">
