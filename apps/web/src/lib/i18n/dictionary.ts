@@ -118,6 +118,14 @@ export const DICTIONARY = {
   "strategy.horizon.7days": { en: "7 days", ja: "7日" },
   "strategy.computing": { en: "Computing…", ja: "計算中…" },
   "strategy.recompute": { en: "Recompute", ja: "再計算" },
+  "strategy.warning.sourceFallback": {
+    en: "Using {source} because the requested source has no data.",
+    ja: "要求されたデータソースにデータがないため、{source}を使用しています。",
+  },
+  "strategy.warning.horizonTruncated": {
+    en: "Optimised {actual} of {requested} requested slots.",
+    ja: "要求された{requested}スロットのうち{actual}スロットで最適化しました。",
+  },
   "strategy.metric.bosTotalValue": { en: "BoS total value", ja: "BoS合計価値" },
   "strategy.metric.bosTotalValue.hint": { en: "across {n} CSOs", ja: "{n}件のCSO" },
   "strategy.metric.intrinsic": { en: "Intrinsic", ja: "イントリンシック" },

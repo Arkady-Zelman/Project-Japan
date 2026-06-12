@@ -32,10 +32,10 @@ export async function GET(request: Request) {
   const sourceParam = url.searchParams.get("source") ?? "forecast";
   const source: "forecast" | "realised" =
     sourceParam === "realised" ? "realised" : "forecast";
-  const horizonSlots = Math.min(
-    Math.max(Number(url.searchParams.get("horizon_slots") ?? DEFAULT_HORIZON_SLOTS), 8),
-    336,
-  );
+  const requestedHorizon = Number(url.searchParams.get("horizon_slots") ?? DEFAULT_HORIZON_SLOTS);
+  const horizonSlots = Number.isFinite(requestedHorizon)
+    ? Math.min(Math.max(requestedHorizon, 8), 336)
+    : DEFAULT_HORIZON_SLOTS;
   const explicitAssetId = url.searchParams.get("asset_id");
 
   // Explicit asset_id implies "show *this* user's asset", so require auth.
@@ -121,19 +121,21 @@ export async function GET(request: Request) {
       power_mw: 50,
       energy_mwh: 100,
       round_trip_eff: 0.85,
-      soc_min_pct: 10,
-      soc_max_pct: 90,
+      soc_min_pct: 0.1,
+      soc_max_pct: 0.9,
     };
   }
 
   // Pull the forward curve.
   let forward: ForwardPoint[] = [];
+  let resolvedSource = source;
   if (source === "forecast") {
     forward = await buildForecastCurve(supabase, area_id, horizonSlots);
   }
   // Fall back to realised if no forecast available.
   if (forward.length === 0) {
     forward = await buildRealisedCurve(supabase, area_id, horizonSlots);
+    resolvedSource = "realised";
   }
   if (forward.length === 0) {
     return NextResponse.json(
@@ -145,7 +147,7 @@ export async function GET(request: Request) {
   const result = runBoS(forward, assetSpec, { dt_hours: 0.5, corr_decay_hours: 24 });
 
   return NextResponse.json({
-    source: forward.length > 0 ? source : "realised",
+    source: resolvedSource,
     asset: {
       id: assetMeta.id,
       name: assetMeta.name,
@@ -154,7 +156,9 @@ export async function GET(request: Request) {
       energy_mwh: assetSpec.energy_mwh,
       round_trip_eff: assetSpec.round_trip_eff,
     },
+    requested_horizon_slots: horizonSlots,
     horizon_slots: forward.length,
+    horizon_truncated: forward.length < horizonSlots,
     dt_hours: 0.5,
     ...result,
   });
@@ -171,7 +175,7 @@ async function buildForecastCurve(
 ): Promise<ForwardPoint[]> {
   const { data: run } = await supabase
     .from("forecast_runs")
-    .select("id, forecast_origin, horizon_slots")
+    .select("id, forecast_origin, horizon_slots, n_paths")
     .eq("area_id", area_id)
     .order("forecast_origin", { ascending: false })
     .limit(1)
@@ -189,16 +193,19 @@ async function buildForecastCurve(
   const all: { slot_start: string; price_jpy_kwh: number }[] = [];
   const pageSize = 1000;
   let from = 0;
-  // 9 utilities is irrelevant here — we're per-area. Cap pages to a safety
-  // limit; 1000 paths × 48 slots = 48k rows / 1000 page = 48 pages.
-  for (let page = 0; page < 200; page++) {
+  const expectedRows = Math.max(Number(run.n_paths) || 1000, 1) * usedHorizon;
+  const maxPages = Math.min(Math.ceil(expectedRows / pageSize) + 2, 1000);
+  for (let page = 0; page < maxPages; page++) {
     const { data, error } = await supabase
       .from("forecast_paths")
-      .select("slot_start, price_jpy_kwh")
+      .select("slot_start, path_id, price_jpy_kwh")
       .eq("forecast_run_id", run.id)
       .lt("slot_start", horizonEnd)
+      .order("slot_start", { ascending: true })
+      .order("path_id", { ascending: true })
       .range(from, from + pageSize - 1);
-    if (error || !data || data.length === 0) break;
+    if (error) throw new Error(`failed to load forecast paths: ${error.message}`);
+    if (!data || data.length === 0) break;
     for (const r of data as { slot_start: string; price_jpy_kwh: number | string }[]) {
       all.push({ slot_start: r.slot_start, price_jpy_kwh: Number(r.price_jpy_kwh) });
     }
@@ -248,13 +255,26 @@ async function buildRealisedCurve(
   }
   const since = new Date(now.getTime() - REALISED_LOOKBACK_DAYS * 24 * 3600 * 1000);
 
-  const { data: rows } = await supabase
-    .from("jepx_spot_prices")
-    .select("slot_start, price_jpy_kwh")
-    .eq("area_id", area_id)
-    .eq("auction_type", "day_ahead")
-    .gte("slot_start", since.toISOString())
-    .order("slot_start", { ascending: true });
+  const rows: { slot_start: string; price_jpy_kwh: number | null }[] = [];
+  const pageSize = 1000;
+  let from = 0;
+  for (let page = 0; page < 20; page++) {
+    const { data, error } = await supabase
+      .from("jepx_spot_prices")
+      .select("slot_start, price_jpy_kwh")
+      .eq("area_id", area_id)
+      .eq("auction_type", "day_ahead")
+      .gte("slot_start", since.toISOString())
+      .order("slot_start", { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (error) throw new Error(`failed to load realised prices: ${error.message}`);
+    if (!data || data.length === 0) break;
+    for (const r of data as { slot_start: string; price_jpy_kwh: number | null }[]) {
+      rows.push(r);
+    }
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
   if (!rows || rows.length === 0) return [];
 
   // Bucket by (weekday, halfhour-of-day).
