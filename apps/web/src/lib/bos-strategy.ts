@@ -46,7 +46,7 @@ export type CSO = {
   discharge_ts: string;
   /** MWh charged at charge_ix. After round-trip loss this becomes volume_mwh*eta delivered at discharge_ix. */
   volume_mwh: number;
-  /** F_discharge*eta - F_charge per kWh. JPY/kWh. */
+  /** F_discharge*round_trip_eff - F_charge per kWh charged. JPY/kWh. */
   spread_jpy_kwh: number;
   spread_vol_jpy_kwh: number;
   intrinsic_jpy: number;
@@ -154,13 +154,16 @@ export function runBoS(
     for (let j = i + 1; j < N; j++) {
       const fj = forward[j]!.price;
       const sj = Math.max(forward[j]!.vol, 0);
-      // Per-kWh spread: deliver eta·F_j at discharge after paying F_i to charge.
-      const spread = eta_one_way * fj - fi;
+      // Per-kWh spread for energy bought at charge: we pay F_i for each kWh
+      // charged and sell only round_trip_eff of it at F_j.
+      const spread = eta_round_trip * fj - fi;
       // Per-kWh spread vol (Bachelier).
       const dh = (j - i) * dt;
       const rho = Math.exp(-dh / tau_h);
       const var_spread =
-        si * si + (sj * eta_one_way) * (sj * eta_one_way) - 2 * rho * si * (sj * eta_one_way);
+        si * si +
+        (sj * eta_round_trip) * (sj * eta_round_trip) -
+        2 * rho * si * (sj * eta_round_trip);
       const spread_vol = Math.sqrt(Math.max(var_spread, 0));
       // Bachelier valuation, K = 0, T = dh / 8760 (year fraction).
       const T_year = dh / 8760;

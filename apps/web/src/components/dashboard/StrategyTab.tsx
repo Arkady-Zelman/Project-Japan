@@ -61,7 +61,9 @@ type TradeableSlot = {
 type BoSResponse = {
   source: Forecast;
   asset: { id: string; name: string; area: string; power_mw: number; energy_mwh: number; round_trip_eff: number };
+  requested_horizon_slots: number;
   horizon_slots: number;
+  horizon_truncated: boolean;
   dt_hours: number;
   total_intrinsic_jpy: number;
   total_extrinsic_jpy: number;
@@ -184,6 +186,26 @@ export function StrategyTab() {
         </div>
       )}
 
+      {data && (data.source !== source || data.horizon_truncated) && (
+        <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm text-amber-500">
+          {data.source !== source
+            ? t("strategy.warning.sourceFallback", {
+                source:
+                  data.source === "forecast"
+                    ? t("strategy.source.forecast")
+                    : t("strategy.source.realised"),
+              })
+            : null}
+          {data.source !== source && data.horizon_truncated ? " " : ""}
+          {data.horizon_truncated
+            ? t("strategy.warning.horizonTruncated", {
+                actual: data.horizon_slots,
+                requested: data.requested_horizon_slots,
+              })
+            : null}
+        </div>
+      )}
+
       {loading && !data && (
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -280,7 +302,7 @@ function PhysicalProfile({ data }: { data: BoSResponse }) {
         price: s.forward_price,
       };
     });
-  }, [data]);
+  }, [data, labeler]);
 
   // Show ~12 labels max regardless of horizon, every Nth tick.
   const tickInterval = Math.max(0, Math.floor(chartData.length / 12) - 1);
@@ -363,7 +385,7 @@ function ExpectedPnL({ data }: { data: BoSResponse }) {
         price: s.forward_price,
       };
     });
-  }, [data]);
+  }, [data, labeler]);
 
   const tickInterval = Math.max(0, Math.floor(chartData.length / 12) - 1);
   const final = chartData[chartData.length - 1];
