@@ -16,7 +16,6 @@ const STRATEGIES = [
   { id: "intrinsic", label: "Intrinsic (perfect foresight)" },
   { id: "rolling_intrinsic", label: "Rolling intrinsic (24h lookahead)" },
   { id: "lsm", label: "LSM (M4 stack-driven)" },
-  { id: "lsm_vlstm", label: "LSM (VLSTM-driven)" },
 ] as const;
 type StrategyId = (typeof STRATEGIES)[number]["id"];
 
