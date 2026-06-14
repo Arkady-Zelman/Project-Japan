@@ -26,9 +26,9 @@ const requestSchema = z.object({
   window_start: z.string().date(),
   window_end: z.string().date(),
   strategies: z
-    .array(z.enum(["lsm", "intrinsic", "rolling_intrinsic", "naive_spread", "lsm_vlstm"]))
+    .array(z.enum(["lsm", "intrinsic", "rolling_intrinsic", "naive_spread"]))
     .min(1)
-    .max(5),
+    .max(4),
   spread_jpy_kwh: z.number().nonnegative().default(2.0),
   naive_buy_threshold_jpy_kwh: z.number().nonnegative().optional(),
   naive_sell_threshold_jpy_kwh: z.number().nonnegative().optional(),
