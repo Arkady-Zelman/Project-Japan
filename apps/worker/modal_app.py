@@ -491,7 +491,10 @@ def regime_infer_daily() -> dict:
 
     init_sentry()
     today = datetime.now(tz=UTC).date()
-    return run_all(today - timedelta(days=2), today + timedelta(days=1))
+    # JanczuraWeronMRS needs at least 200 residual observations. A 14-day
+    # recent window gives enough half-hourly slots even with sparse joins while
+    # keeping the daily refresh bounded.
+    return run_all(today - timedelta(days=14), today + timedelta(days=1))
 
 
 @app.function(image=base_image, cpu=2.0, timeout=3600, secrets=_secrets)
