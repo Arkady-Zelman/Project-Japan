@@ -49,6 +49,14 @@ def _load_backtest_row(cur: psycopg.Cursor, backtest_id: UUID) -> dict:
     }
 
 
+def _load_backtest_user_id(backtest_id: UUID) -> UUID | None:
+    """Return the owning user for audit-row RLS before writing compute_runs."""
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute("select user_id from backtests where id = %s", (str(backtest_id),))
+        row = cur.fetchone()
+    return row[0] if row and row[0] is not None else None
+
+
 def _load_asset_spec(cur: psycopg.Cursor, asset_id: str) -> AssetSpec:
     cur.execute(
         """
@@ -196,7 +204,8 @@ def run_backtest(
     naive_sell: float | None = None,
 ) -> BacktestResult:
     """End-to-end backtest. Persists all metrics + trade rows. Audits via compute_runs."""
-    with compute_run("backtest") as run:
+    user_id = _load_backtest_user_id(backtest_id)
+    with compute_run("backtest", user_id=user_id) as run:
         run.set_input({
             "backtest_id": str(backtest_id),
             "spread_jpy_kwh": spread_jpy_kwh,
