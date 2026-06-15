@@ -63,6 +63,14 @@ def _load_queued_valuation(cur: psycopg.Cursor, valuation_id: UUID) -> dict:
     }
 
 
+def _load_valuation_user_id(valuation_id: UUID) -> UUID | None:
+    """Return the owning user for audit-row RLS before writing compute_runs."""
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute("select user_id from valuations where id = %s", (str(valuation_id),))
+        row = cur.fetchone()
+    return row[0] if row and row[0] is not None else None
+
+
 def _load_asset(cur: psycopg.Cursor, asset_id: str) -> AssetSpec:
     cur.execute(
         """
@@ -155,7 +163,8 @@ def _load_forecast_paths(
 
 def run_valuation(valuation_id: UUID) -> ValuationResult:
     """End-to-end. Persists all rows. Updates status. Audits via compute_runs."""
-    with compute_run("lsm_valuation") as run:
+    user_id = _load_valuation_user_id(valuation_id)
+    with compute_run("lsm_valuation", user_id=user_id) as run:
         run.set_input({"valuation_id": str(valuation_id)})
 
         with connect() as conn, conn.cursor() as cur:
