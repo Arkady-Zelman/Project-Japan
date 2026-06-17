@@ -91,9 +91,10 @@ export async function GET(request: Request) {
   for (let from = 0; from < totalRows; from += PAGE) {
     const { data: pageRows, error } = await supabase
       .from("forecast_paths")
-      .select("slot_start, price_jpy_kwh")
+      .select("slot_start, path_id, price_jpy_kwh")
       .eq("forecast_run_id", runRow.id)
       .order("slot_start", { ascending: true })
+      .order("path_id", { ascending: true })
       .range(from, Math.min(from + PAGE - 1, totalRows - 1));
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
