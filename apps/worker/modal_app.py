@@ -217,16 +217,28 @@ def vacuum_full_tables(tables_csv: str = "") -> dict:
 
 
 @app.function(image=base_image, cpu=2.0, timeout=3600, secrets=_secrets)
-def prune_old_data() -> dict:
-    """Trim historical data the dashboard doesn't read. Run on-demand when
-    DB nears its disk limit. Retention windows are sized to the longest
-    UI surface that reads each table.
+def prune_old_data(confirm_destructive: bool = False) -> dict:
+    """Emergency-only historical data trim.
+
+    This deletes canonical historical market/model data and must never be
+    called from scheduled jobs. Prefer `prune_forecast_paths` for routine
+    retention; it only removes generated forecast runs.
 
     Order matters: smaller, indexed deletes first so WAL stays manageable
     even when disk is near-full. VACUUM at the end reclaims pages.
     """
     from datetime import UTC, datetime, timedelta
+
     from common.db import connect
+
+    if not confirm_destructive:
+        return {
+            "status": "refused",
+            "error": (
+                "prune_old_data deletes historical market/model data; rerun with "
+                "confirm_destructive=True for an explicitly approved emergency prune"
+            ),
+        }
 
     now = datetime.now(tz=UTC)
     # Time-windowed DELETE on the actuals tables (no FK cascade hazard).
@@ -528,10 +540,9 @@ def stack_run_daily() -> dict:
     except Exception as e:  # noqa: BLE001
         out["regime_infer_spawned"] = f"error: {e}"
 
-    # Nightly retention sweep. Trims actuals to ≤90 days, regime_states to
-    # ≤30 days, weather_obs to ≤14 days, and TRUNCATEs the stack pair
-    # (rebuilt by next stack run). Keeps the Supabase free-tier disk from
-    # refilling and re-triggering the May-22 outage.
+    # Nightly forecast retention. Forecast paths are generated artifacts and
+    # grow by hundreds of thousands of rows per inference; canonical market
+    # history and stack/regime data must remain intact for training/backtests.
     try:
         prune_nightly.spawn()
         out["prune_spawned"] = True
@@ -564,6 +575,7 @@ def regime_infer_daily() -> dict:
     Regime tab's posteriors stay current between the weekly recalibrations.
     Operator can also run on demand: modal run modal_app.py::regime_infer_daily."""
     from datetime import UTC, datetime, timedelta
+
     from common.sentry import init_sentry
     from regime.infer_state import run_all
 
@@ -574,11 +586,13 @@ def regime_infer_daily() -> dict:
 
 @app.function(image=base_image, cpu=2.0, timeout=3600, secrets=_secrets)
 def prune_nightly() -> dict:
-    """Nightly retention sweep. Trims actuals to 90d, regime_states to 30d,
-    weather_obs to 14d; TRUNCATEs the stack pair. Same body as
-    prune_old_data — spawned from stack_run_daily.
+    """Nightly retention sweep for generated forecast runs only.
+
+    Historical market actuals, stack curves, stack clearing prices, and regime
+    states are canonical inputs for training, validation, backtests, and the AI
+    analyst. Do not prune them as part of routine retention.
     """
-    return prune_old_data.local()
+    return prune_forecast_paths.local(retain_latest_per_area=2)
 
 
 @app.function(image=base_image, cpu=4.0, timeout=1800, secrets=_secrets)
