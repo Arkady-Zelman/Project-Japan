@@ -808,7 +808,7 @@ def lsm_value(payload: dict) -> dict:
     from uuid import UUID
 
     from common.sentry import init_sentry
-    from lsm.runner import mark_failed, run_valuation
+    from lsm.runner import NonQueuedValuationError, mark_failed, run_valuation
 
     init_sentry()
     valuation_id_str = payload.get("valuation_id")
@@ -820,6 +820,8 @@ def lsm_value(payload: dict) -> dict:
         return {"error": f"invalid uuid: {valuation_id_str}"}
     try:
         result = run_valuation(vid)
+    except NonQueuedValuationError as e:
+        return {"error": str(e)}
     except Exception as e:
         mark_failed(vid, repr(e))
         raise
@@ -837,12 +839,14 @@ def lsm_value_run(valuation_id: str) -> dict:
     from uuid import UUID
 
     from common.sentry import init_sentry
-    from lsm.runner import mark_failed, run_valuation
+    from lsm.runner import NonQueuedValuationError, mark_failed, run_valuation
 
     init_sentry()
     vid = UUID(valuation_id)
     try:
         result = run_valuation(vid)
+    except NonQueuedValuationError:
+        raise
     except Exception as e:
         mark_failed(vid, repr(e))
         raise
@@ -865,7 +869,7 @@ def run_backtest(payload: dict) -> dict:
     """
     from uuid import UUID
 
-    from backtest.runner import mark_failed
+    from backtest.runner import NonQueuedBacktestError, mark_failed
     from backtest.runner import run_backtest as _run_backtest
     from common.sentry import init_sentry
 
@@ -887,6 +891,8 @@ def run_backtest(payload: dict) -> dict:
             naive_buy=float(naive_buy) if naive_buy is not None else None,
             naive_sell=float(naive_sell) if naive_sell is not None else None,
         )
+    except NonQueuedBacktestError as e:
+        return {"error": str(e)}
     except Exception as e:
         mark_failed(bid, repr(e))
         raise
@@ -898,7 +904,7 @@ def run_backtest_run(backtest_id: str, spread_jpy_kwh: float = 2.0) -> dict:
     """`modal run` variant of `run_backtest`. Same body."""
     from uuid import UUID
 
-    from backtest.runner import mark_failed
+    from backtest.runner import NonQueuedBacktestError, mark_failed
     from backtest.runner import run_backtest as _run_backtest
     from common.sentry import init_sentry
 
@@ -906,6 +912,8 @@ def run_backtest_run(backtest_id: str, spread_jpy_kwh: float = 2.0) -> dict:
     bid = UUID(backtest_id)
     try:
         result = _run_backtest(bid, spread_jpy_kwh=spread_jpy_kwh)
+    except NonQueuedBacktestError:
+        raise
     except Exception as e:
         mark_failed(bid, repr(e))
         raise
