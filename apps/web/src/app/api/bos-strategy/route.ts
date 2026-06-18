@@ -121,8 +121,8 @@ export async function GET(request: Request) {
       power_mw: 50,
       energy_mwh: 100,
       round_trip_eff: 0.85,
-      soc_min_pct: 10,
-      soc_max_pct: 90,
+      soc_min_pct: 0.10,
+      soc_max_pct: 0.90,
     };
   }
 
@@ -139,6 +139,19 @@ export async function GET(request: Request) {
     return NextResponse.json(
       { error: "no forward data available for area" },
       { status: 409 },
+    );
+  }
+
+  if (
+    !Number.isFinite(assetSpec.soc_min_pct) ||
+    !Number.isFinite(assetSpec.soc_max_pct) ||
+    assetSpec.soc_min_pct < 0 ||
+    assetSpec.soc_max_pct > 1 ||
+    assetSpec.soc_min_pct >= assetSpec.soc_max_pct
+  ) {
+    return NextResponse.json(
+      { error: "asset SoC limits must be fractions between 0 and 1" },
+      { status: 422 },
     );
   }
 
