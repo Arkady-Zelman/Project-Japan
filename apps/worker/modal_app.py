@@ -217,16 +217,30 @@ def vacuum_full_tables(tables_csv: str = "") -> dict:
 
 
 @app.function(image=base_image, cpu=2.0, timeout=3600, secrets=_secrets)
-def prune_old_data() -> dict:
-    """Trim historical data the dashboard doesn't read. Run on-demand when
-    DB nears its disk limit. Retention windows are sized to the longest
-    UI surface that reads each table.
+def prune_old_data(confirm: str = "") -> dict:
+    """Emergency trim for canonical historical tables.
+
+    This is intentionally on-demand only. The nightly retention path must not
+    call it: jepx/stack/regime/weather history feeds forecast lookback,
+    calibration, dashboards, and backtests, so automated deletes here cause
+    user-facing breakage and data loss.
 
     Order matters: smaller, indexed deletes first so WAL stays manageable
     even when disk is near-full. VACUUM at the end reclaims pages.
     """
     from datetime import UTC, datetime, timedelta
     from common.db import connect
+
+    required_confirmation = "DELETE_CANONICAL_HISTORY"
+    if confirm != required_confirmation:
+        return {
+            "skipped": True,
+            "reason": (
+                "prune_old_data deletes canonical historical tables. Re-run with "
+                f"confirm={required_confirmation!r} only for an operator-approved "
+                "emergency."
+            ),
+        }
 
     now = datetime.now(tz=UTC)
     # Time-windowed DELETE on the actuals tables (no FK cascade hazard).
@@ -272,12 +286,9 @@ def prune_old_data() -> dict:
             out["deleted"][table] = {"rows": total, "cutoff": cutoff.isoformat()}
             print(f"  {table}: deleted {total} rows older than {cutoff.date()}")
 
-        # The stack pair is huge (943 MB curves + 79 MB clearing) and FK-
-        # linked. Per-row DELETE triggers an FK check on every curve row.
-        # TRUNCATE … CASCADE atomically clears both at once with no FK
-        # validation per row — far faster on this scale, at the cost of
-        # losing historical stack curves. Tomorrow's stack_run_daily
-        # repopulates the current slot; older slots are rarely viewed.
+        # Emergency-only operator action: the stack pair is huge and FK-
+        # linked, so TRUNCATE clears it without per-row FK checks. This is
+        # destructive and must never be part of automated nightly retention.
         cur.execute("truncate table stack_curves, stack_clearing_prices restart identity cascade")
         conn.commit()
         out["truncated"] = ["stack_curves", "stack_clearing_prices"]
@@ -528,10 +539,9 @@ def stack_run_daily() -> dict:
     except Exception as e:  # noqa: BLE001
         out["regime_infer_spawned"] = f"error: {e}"
 
-    # Nightly retention sweep. Trims actuals to ≤90 days, regime_states to
-    # ≤30 days, weather_obs to ≤14 days, and TRUNCATEs the stack pair
-    # (rebuilt by next stack run). Keeps the Supabase free-tier disk from
-    # refilling and re-triggering the May-22 outage.
+    # Nightly retention for generated forecasts only. Canonical market,
+    # stack, weather, and regime history is retained because forecast
+    # lookback, calibration, dashboards, and backtests depend on it.
     try:
         prune_nightly.spawn()
         out["prune_spawned"] = True
@@ -574,11 +584,13 @@ def regime_infer_daily() -> dict:
 
 @app.function(image=base_image, cpu=2.0, timeout=3600, secrets=_secrets)
 def prune_nightly() -> dict:
-    """Nightly retention sweep. Trims actuals to 90d, regime_states to 30d,
-    weather_obs to 14d; TRUNCATEs the stack pair. Same body as
-    prune_old_data — spawned from stack_run_daily.
+    """Nightly generated-data retention spawned from stack_run_daily.
+
+    Keep this limited to forecast_runs/forecast_paths. Historical market,
+    stack, weather, and regime tables are canonical inputs for the rest of the
+    product and must not be pruned automatically.
     """
-    return prune_old_data.local()
+    return prune_forecast_paths.local(retain_latest_per_area=2)
 
 
 @app.function(image=base_image, cpu=4.0, timeout=1800, secrets=_secrets)
