@@ -14,7 +14,7 @@ export type BacktestRow = {
   id: string;
   asset_id: string;
   user_id: string;
-  strategy: "lsm" | "intrinsic" | "rolling_intrinsic" | "naive_spread";
+  strategy: "lsm" | "intrinsic" | "rolling_intrinsic" | "naive_spread" | "lsm_vlstm";
   window_start: string;
   window_end: string;
   status: "queued" | "running" | "done" | "failed";
