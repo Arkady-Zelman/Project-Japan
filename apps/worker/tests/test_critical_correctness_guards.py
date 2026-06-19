@@ -85,5 +85,5 @@ def test_lsm_vlstm_backtest_matches_forecast_path_schema() -> None:
     assert "where forecast_run_id = %s" in loader
     assert "path_index" not in loader
     assert "slot_ix < %s" not in loader
-    assert "run_id = %s" not in loader
+    assert "where run_id = %s" not in loader
     assert "lsm_vlstm" in migration
