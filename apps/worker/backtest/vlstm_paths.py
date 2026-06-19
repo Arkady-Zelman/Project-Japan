@@ -11,7 +11,7 @@ that slot — the LSMVLSTMStrategy falls back to stack-driven forecasts.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import cast
 
 import numpy as np
@@ -67,27 +67,41 @@ def load_vlstm_paths_per_origin(
                 continue
             run_id = cast(str, row[0])
 
-            # Pull all (path_index, slot_ix, price_jpy_kwh) rows for that run.
+            # Pull path rows from the persisted schema:
+            # (forecast_run_id, path_id, slot_start, price_jpy_kwh).
+            horizon_end = origin_ts + timedelta(minutes=30 * (H + 1))
             cur.execute(
                 """
-                select path_index, slot_ix, price_jpy_kwh
+                select path_id, slot_start, price_jpy_kwh
                 from forecast_paths
-                where run_id = %s and slot_ix < %s
+                where forecast_run_id = %s
+                  and slot_start >= %s
+                  and slot_start < %s
+                order by slot_start, path_id
                 """,
-                (run_id, H + 1),
+                (run_id, origin_ts, horizon_end),
             )
             rows = cur.fetchall()
             if not rows:
                 out[i] = None
                 continue
-            # Reshape into (P, H+1).
-            max_path = max(int(r[0]) for r in rows)
-            max_slot = max(int(r[1]) for r in rows)
+            # Reshape into (P, S), where S may be shorter than H+1 if the
+            # latest forecast run started before this backtest roll origin.
+            slot_rows: list[tuple[int, int, float]] = []
+            for path_id, slot_start, price in rows:
+                slot_ix = round((slot_start - origin_ts).total_seconds() / (30 * 60))
+                if 0 <= slot_ix <= H:
+                    slot_rows.append((int(path_id), int(slot_ix), float(price)))
+            if not slot_rows:
+                out[i] = None
+                continue
+            max_path = max(r[0] for r in slot_rows)
+            max_slot = max(r[1] for r in slot_rows)
             P = max_path + 1
             S = max_slot + 1
             mat = np.full((P, S), np.nan, dtype=np.float64)
-            for r in rows:
-                mat[int(r[0]), int(r[1])] = float(r[2])
+            for path_id, slot_ix, price in slot_rows:
+                mat[path_id, slot_ix] = price
             # Drop any path rows with NaN (incomplete).
             valid = ~np.isnan(mat).any(axis=1)
             mat = mat[valid]

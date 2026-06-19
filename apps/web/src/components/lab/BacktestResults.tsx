@@ -29,6 +29,7 @@ const STRATEGY_COLORS: Record<string, string> = {
   intrinsic: "#22c55e",          // green
   rolling_intrinsic: "#3b82f6",  // blue
   lsm: "#dc2626",                // red
+  lsm_vlstm: "#f97316",          // orange
 };
 
 const STRATEGY_LABELS: Record<string, string> = {
@@ -36,6 +37,7 @@ const STRATEGY_LABELS: Record<string, string> = {
   intrinsic: "Intrinsic",
   rolling_intrinsic: "Rolling intrinsic",
   lsm: "LSM (stack)",
+  lsm_vlstm: "LSM (VLSTM)",
 };
 
 type Props = {

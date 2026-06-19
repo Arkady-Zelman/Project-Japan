@@ -51,6 +51,14 @@ const TABLE_SPANS: { kind: (typeof INGEST_KINDS)[number]; table: string; column:
 ];
 
 const ALL_KINDS = [...INGEST_KINDS, ...MODEL_KINDS, ...COMPUTE_KINDS] as const;
+const PUBLIC_ERROR_MESSAGE = "Details are available in the worker logs.";
+
+function sanitizeRunError<T extends { status: string; error: string | null }>(run: T): T {
+  return {
+    ...run,
+    error: run.status === "failed" && run.error ? PUBLIC_ERROR_MESSAGE : null,
+  };
+}
 
 async function fetchLatestRuns(): Promise<LatestRun[]> {
   const supa = createServerClient();
@@ -58,6 +66,7 @@ async function fetchLatestRuns(): Promise<LatestRun[]> {
     .from("compute_runs")
     .select("kind, status, created_at, duration_ms, error, output")
     .in("kind", [...ALL_KINDS])
+    .is("user_id", null)
     .order("created_at", { ascending: false })
     .limit(500);
   if (error) {
@@ -69,7 +78,7 @@ async function fetchLatestRuns(): Promise<LatestRun[]> {
   for (const row of (data ?? []) as LatestRun[]) {
     if (seen.has(row.kind)) continue;
     seen.add(row.kind);
-    latest.push(row);
+    latest.push(sanitizeRunError(row));
   }
   return latest;
 }
@@ -107,6 +116,7 @@ async function fetchRecentRuns(): Promise<CronRun[]> {
     .from("compute_runs")
     .select("kind, status, created_at, error")
     .in("kind", [...ALL_KINDS])
+    .is("user_id", null)
     .gte("created_at", since)
     .order("created_at", { ascending: false })
     .limit(2000);
@@ -114,7 +124,7 @@ async function fetchRecentRuns(): Promise<CronRun[]> {
     console.error("compute_runs (7d) fetch failed:", error);
     return [];
   }
-  return (data ?? []) as CronRun[];
+  return ((data ?? []) as CronRun[]).map(sanitizeRunError);
 }
 
 export default async function DashboardPage() {
