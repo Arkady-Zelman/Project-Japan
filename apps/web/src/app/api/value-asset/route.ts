@@ -175,11 +175,17 @@ export async function POST(request: Request) {
   }
   const { data: runMeta } = await supabase
     .from("forecast_runs")
-    .select("forecast_origin, horizon_slots")
+    .select("forecast_origin, horizon_slots, area_id")
     .eq("id", forecast_run_id)
     .maybeSingle();
   if (!runMeta) {
     return NextResponse.json({ error: "forecast_run not found" }, { status: 404 });
+  }
+  if (runMeta.area_id !== area_id) {
+    return NextResponse.json(
+      { error: "forecast_run belongs to a different asset area" },
+      { status: 409 },
+    );
   }
   const horizon_start = runMeta.forecast_origin;
   const horizonEndDate = new Date(
