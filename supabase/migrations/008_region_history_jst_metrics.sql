@@ -1,11 +1,10 @@
 -- ============================================================
--- 007_region_history.sql
+-- 008_region_history_jst_metrics.sql
 -- ============================================================
--- Daily-aggregated historical series per area for the dashboard map's
--- expanded-region chart. Three metrics:
---   - 'vre_share'    avg over slots of (solar+wind+hydro)/total_gen
---   - 'balance_pct'  avg over slots of (total_gen-demand)/demand
---   - 'price'        avg over slots of jepx_spot_prices.price_jpy_kwh
+-- Correct region_history daily aggregation:
+--   - bucket days in Asia/Tokyo, not UTC
+--   - compute documented daily averages from slot-level metrics
+--   - emit NULL, not -100%, when demand exists but generation is missing
 -- ============================================================
 
 create or replace function region_history(

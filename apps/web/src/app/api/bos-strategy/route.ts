@@ -121,19 +121,21 @@ export async function GET(request: Request) {
       power_mw: 50,
       energy_mwh: 100,
       round_trip_eff: 0.85,
-      soc_min_pct: 10,
-      soc_max_pct: 90,
+      soc_min_pct: 0.10,
+      soc_max_pct: 0.90,
     };
   }
 
   // Pull the forward curve.
   let forward: ForwardPoint[] = [];
+  let actualSource: "forecast" | "realised" = source;
   if (source === "forecast") {
     forward = await buildForecastCurve(supabase, area_id, horizonSlots);
   }
   // Fall back to realised if no forecast available.
   if (forward.length === 0) {
     forward = await buildRealisedCurve(supabase, area_id, horizonSlots);
+    actualSource = "realised";
   }
   if (forward.length === 0) {
     return NextResponse.json(
@@ -145,7 +147,7 @@ export async function GET(request: Request) {
   const result = runBoS(forward, assetSpec, { dt_hours: 0.5, corr_decay_hours: 24 });
 
   return NextResponse.json({
-    source: forward.length > 0 ? source : "realised",
+    source: actualSource,
     asset: {
       id: assetMeta.id,
       name: assetMeta.name,
@@ -194,9 +196,11 @@ async function buildForecastCurve(
   for (let page = 0; page < 200; page++) {
     const { data, error } = await supabase
       .from("forecast_paths")
-      .select("slot_start, price_jpy_kwh")
+      .select("path_id, slot_start, price_jpy_kwh")
       .eq("forecast_run_id", run.id)
       .lt("slot_start", horizonEnd)
+      .order("slot_start", { ascending: true })
+      .order("path_id", { ascending: true })
       .range(from, from + pageSize - 1);
     if (error || !data || data.length === 0) break;
     for (const r of data as { slot_start: string; price_jpy_kwh: number | string }[]) {
@@ -257,12 +261,12 @@ async function buildRealisedCurve(
     .order("slot_start", { ascending: true });
   if (!rows || rows.length === 0) return [];
 
-  // Bucket by (weekday, halfhour-of-day).
+  // Bucket by JST (weekday, halfhour-of-day), matching JEPX trading days.
   const buckets = new Map<string, number[]>();
   for (const r of rows as { slot_start: string; price_jpy_kwh: number | null }[]) {
     if (r.price_jpy_kwh == null) continue;
     const d = new Date(r.slot_start);
-    const key = `${d.getUTCDay()}-${d.getUTCHours()}-${d.getUTCMinutes()}`;
+    const key = jstSlotKey(d);
     const arr = buckets.get(key) ?? [];
     arr.push(Number(r.price_jpy_kwh));
     buckets.set(key, arr);
@@ -271,7 +275,7 @@ async function buildRealisedCurve(
   const out: ForwardPoint[] = [];
   for (let ix = 0; ix < horizon_slots; ix++) {
     const ts = new Date(now.getTime() + ix * 30 * 60 * 1000);
-    const key = `${ts.getUTCDay()}-${ts.getUTCHours()}-${ts.getUTCMinutes()}`;
+    const key = jstSlotKey(ts);
     const arr = buckets.get(key) ?? [];
     if (arr.length === 0) continue;
     let sum = 0;
@@ -283,4 +287,9 @@ async function buildRealisedCurve(
     out.push({ ix, ts: ts.toISOString(), price: mean, vol });
   }
   return out;
+}
+
+function jstSlotKey(date: Date): string {
+  const jst = new Date(date.getTime() + 9 * 60 * 60 * 1000);
+  return `${jst.getUTCDay()}-${jst.getUTCHours()}-${jst.getUTCMinutes()}`;
 }
