@@ -11,7 +11,7 @@ that slot — the LSMVLSTMStrategy falls back to stack-driven forecasts.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import cast
 
 import numpy as np
@@ -20,13 +20,17 @@ from common.db import connect
 
 logger = logging.getLogger("backtest.vlstm_paths")
 
+# Must match LSMVLSTMStrategy's rolling grid; otherwise the loader hands the
+# strategy forecasts anchored to different timestamps than the action origins.
+DEFAULT_ROLL_INTERVAL_SLOTS = 2
+
 
 def load_vlstm_paths_per_origin(
     area_id: str,
     slot_starts: list[datetime],
     *,
     lookahead_slots: int = 48,
-    roll_interval_slots: int = 24,
+    roll_interval_slots: int = DEFAULT_ROLL_INTERVAL_SLOTS,
 ) -> list[np.ndarray | None]:
     """Return forecast_paths matrices per LSM roll origin.
 
@@ -35,7 +39,7 @@ def load_vlstm_paths_per_origin(
         slot_starts: full list of realised slot_start timestamps in the
             backtest window.
         lookahead_slots: number of half-hour slots in each forecast (= 48).
-        roll_interval_slots: how often LSM rolls (= 24, i.e. every 12h).
+        roll_interval_slots: how often LSM rolls (= 2, i.e. every 1h).
 
     Returns:
         List of (P, lookahead_slots+1) ndarrays in JPY/kWh, one per origin.
@@ -67,14 +71,20 @@ def load_vlstm_paths_per_origin(
                 continue
             run_id = cast(str, row[0])
 
-            # Pull all (path_index, slot_ix, price_jpy_kwh) rows for that run.
+            horizon_end = origin_ts + timedelta(minutes=30 * (H + 1))
+            # Pull schema-native forecast_path rows for the remaining horizon
+            # from this roll origin. Older runs may have fewer remaining slots;
+            # LSMVLSTMStrategy pads those curves with the last available price.
             cur.execute(
                 """
-                select path_index, slot_ix, price_jpy_kwh
+                select path_id, slot_start, price_jpy_kwh
                 from forecast_paths
-                where run_id = %s and slot_ix < %s
+                where forecast_run_id = %s
+                  and slot_start >= %s
+                  and slot_start < %s
+                order by slot_start, path_id
                 """,
-                (run_id, H + 1),
+                (run_id, origin_ts, horizon_end),
             )
             rows = cur.fetchall()
             if not rows:
@@ -82,12 +92,15 @@ def load_vlstm_paths_per_origin(
                 continue
             # Reshape into (P, H+1).
             max_path = max(int(r[0]) for r in rows)
-            max_slot = max(int(r[1]) for r in rows)
             P = max_path + 1
-            S = max_slot + 1
+            slot_ix_by_start: dict[datetime, int] = {}
+            for _, slot_start, _ in rows:
+                if slot_start not in slot_ix_by_start:
+                    slot_ix_by_start[slot_start] = len(slot_ix_by_start)
+            S = len(slot_ix_by_start)
             mat = np.full((P, S), np.nan, dtype=np.float64)
-            for r in rows:
-                mat[int(r[0]), int(r[1])] = float(r[2])
+            for path_id, slot_start, price_kwh in rows:
+                mat[int(path_id), slot_ix_by_start[slot_start]] = float(price_kwh)
             # Drop any path rows with NaN (incomplete).
             valid = ~np.isnan(mat).any(axis=1)
             mat = mat[valid]

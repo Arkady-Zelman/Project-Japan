@@ -26,7 +26,7 @@ from lsm.models import AssetSpec
 
 from .models import BacktestResult, StrategyName
 from .slippage import linear_bid_ask
-from .strategies import HOURS_PER_SLOT, KWH_PER_MWH, get_strategy
+from .strategies import DEFAULT_ROLL_INTERVAL_SLOTS, HOURS_PER_SLOT, KWH_PER_MWH, get_strategy
 
 logger = logging.getLogger("backtest.runner")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -233,7 +233,8 @@ def run_backtest(
         if strategy_name == "lsm_vlstm":
             from .vlstm_paths import load_vlstm_paths_per_origin
             vlstm_paths = load_vlstm_paths_per_origin(
-                area_id, slot_starts, lookahead_slots=48, roll_interval_slots=24,
+                area_id, slot_starts, lookahead_slots=48,
+                roll_interval_slots=DEFAULT_ROLL_INTERVAL_SLOTS,
             )
             soc_mwh, actions_mwh = strategy.dispatch(  # type: ignore[call-arg]
                 asset, realised_kwh,
