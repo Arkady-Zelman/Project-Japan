@@ -339,6 +339,9 @@ def value_what_if(args: dict, ctx: ToolContext) -> dict:
     modal_lsm = os.environ.get("MODAL_LSM_ENDPOINT")
     if not modal_lsm:
         return {"success": False, "error": "MODAL_LSM_ENDPOINT not configured"}
+    modal_api_token = os.environ.get("MODAL_API_TOKEN")
+    if not modal_api_token:
+        return {"success": False, "error": "MODAL_API_TOKEN not configured"}
 
     with compute_run("agent_tool_call") as run:
         run.set_input({
@@ -451,7 +454,11 @@ def value_what_if(args: dict, ctx: ToolContext) -> dict:
 
             # Kick Modal LSM endpoint and poll.
             with httpx.Client(timeout=300.0) as client:
-                client.post(modal_lsm, json={"valuation_id": valuation_id})
+                response = client.post(
+                    modal_lsm,
+                    json={"valuation_id": valuation_id, "api_token": modal_api_token},
+                )
+                response.raise_for_status()
             # Poll up to 90s.
             deadline = time.time() + 90
             result_row: tuple | None = None
