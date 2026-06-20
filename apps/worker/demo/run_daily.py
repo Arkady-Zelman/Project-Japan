@@ -15,7 +15,7 @@ demo failures separately from production paths.
 from __future__ import annotations
 
 import logging
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from common.audit import compute_run
@@ -169,7 +169,12 @@ def run() -> dict:
             return out
 
     # ---- LSM valuation ----
-    from lsm.runner import mark_failed as lsm_mark_failed, run_valuation
+    from lsm.runner import (
+        mark_failed as lsm_mark_failed,
+    )
+    from lsm.runner import (
+        run_valuation,
+    )
     try:
         valuation_id = queue_demo_valuation(asset_id)
         try:
@@ -186,7 +191,12 @@ def run() -> dict:
         out["demo_lsm"] = {"error": str(e)}
 
     # ---- Backtests (one row per strategy) ----
-    from backtest.runner import mark_failed as bt_mark_failed, run_backtest
+    from backtest.runner import (
+        mark_failed as bt_mark_failed,
+    )
+    from backtest.runner import (
+        run_backtest,
+    )
     try:
         backtest_ids = queue_demo_backtests(asset_id)
         bt_results: list[dict] = []
