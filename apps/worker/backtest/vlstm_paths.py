@@ -11,12 +11,14 @@ that slot — the LSMVLSTMStrategy falls back to stack-driven forecasts.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import cast
 
 import numpy as np
 
 from common.db import connect
+
+from .strategies import DEFAULT_ROLL_INTERVAL_SLOTS
 
 logger = logging.getLogger("backtest.vlstm_paths")
 
@@ -26,7 +28,7 @@ def load_vlstm_paths_per_origin(
     slot_starts: list[datetime],
     *,
     lookahead_slots: int = 48,
-    roll_interval_slots: int = 24,
+    roll_interval_slots: int = DEFAULT_ROLL_INTERVAL_SLOTS,
 ) -> list[np.ndarray | None]:
     """Return forecast_paths matrices per LSM roll origin.
 
@@ -35,7 +37,7 @@ def load_vlstm_paths_per_origin(
         slot_starts: full list of realised slot_start timestamps in the
             backtest window.
         lookahead_slots: number of half-hour slots in each forecast (= 48).
-        roll_interval_slots: how often LSM rolls (= 24, i.e. every 12h).
+        roll_interval_slots: how often LSM rolls; must match the strategy.
 
     Returns:
         List of (P, lookahead_slots+1) ndarrays in JPY/kWh, one per origin.
@@ -67,27 +69,36 @@ def load_vlstm_paths_per_origin(
                 continue
             run_id = cast(str, row[0])
 
-            # Pull all (path_index, slot_ix, price_jpy_kwh) rows for that run.
+            # Pull path rows using the production forecast_paths schema. The
+            # backtest origin may be later than forecast_origin, so slice by
+            # slot_start and let the strategy pad short trailing windows.
+            window_end = origin_ts + timedelta(minutes=30 * (H + 1))
             cur.execute(
                 """
-                select path_index, slot_ix, price_jpy_kwh
+                select path_id, slot_start, price_jpy_kwh
                 from forecast_paths
-                where run_id = %s and slot_ix < %s
+                where forecast_run_id = %s
+                  and slot_start >= %s
+                  and slot_start < %s
+                order by slot_start, path_id
                 """,
-                (run_id, H + 1),
+                (run_id, origin_ts, window_end),
             )
             rows = cur.fetchall()
             if not rows:
                 out[i] = None
                 continue
-            # Reshape into (P, H+1).
+            # Reshape into (P, observed slots).
             max_path = max(int(r[0]) for r in rows)
-            max_slot = max(int(r[1]) for r in rows)
             P = max_path + 1
-            S = max_slot + 1
+            slot_index = {
+                slot_start: idx
+                for idx, slot_start in enumerate(sorted({cast(datetime, r[1]) for r in rows}))
+            }
+            S = len(slot_index)
             mat = np.full((P, S), np.nan, dtype=np.float64)
             for r in rows:
-                mat[int(r[0]), int(r[1])] = float(r[2])
+                mat[int(r[0]), slot_index[cast(datetime, r[1])]] = float(r[2])
             # Drop any path rows with NaN (incomplete).
             valid = ~np.isnan(mat).any(axis=1)
             mat = mat[valid]

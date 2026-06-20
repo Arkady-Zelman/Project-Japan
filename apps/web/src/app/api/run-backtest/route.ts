@@ -85,8 +85,8 @@ export async function POST(request: Request) {
     .select("slot_start", { count: "exact", head: true })
     .eq("area_id", asset.area_id)
     .eq("auction_type", "day_ahead")
-    .gte("slot_start", `${window_start}T00:00:00Z`)
-    .lt("slot_start", `${window_end}T00:00:00Z`);
+    .gte("slot_start", `${window_start}T00:00:00+09:00`)
+    .lt("slot_start", `${window_end}T00:00:00+09:00`);
   if ((slotCount ?? 0) < 48) {
     return NextResponse.json(
       { error: `window has only ${slotCount ?? 0} slots of realised data; need ≥ 48` },
