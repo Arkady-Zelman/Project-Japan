@@ -129,6 +129,13 @@ export function runBoS(
   const cap_min = asset.soc_min_pct * asset.energy_mwh;
   const cap_max = asset.soc_max_pct * asset.energy_mwh;
   const cap_room = cap_max - cap_min;
+  if (
+    asset.soc_min_pct < 0 ||
+    asset.soc_max_pct > 1 ||
+    asset.soc_min_pct >= asset.soc_max_pct
+  ) {
+    throw new RangeError("BoS asset SoC bounds must be fractions in [0, 1]");
+  }
 
   // Running state across the greedy fill.
   const charge_at = new Array(N).fill(0); // MWh charged at slot i
