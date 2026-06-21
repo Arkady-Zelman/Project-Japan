@@ -94,19 +94,19 @@ def healthcheck() -> str:
     return "ok"
 
 
-@app.function(image=base_image, cpu=2.0, timeout=1800, secrets=_secrets)
-def prune_forecast_paths(retain_latest_per_area: int = 2) -> dict:
-    """Keep only the latest N forecast_runs per area; cascade-delete the
-    rest from forecast_paths and reclaim disk via VACUUM.
+def _prune_forecast_paths_impl(retain_latest_per_area: int = 2) -> dict:
+    """Keep forecast path storage bounded without deleting canonical history.
 
-    1000 paths × 48 slots × 9 areas × N runs = 432K × N rows. With nothing
-    pruning, that grows ~432K/day on the Supabase free tier (500 MB). Run
-    nightly (or on-demand when disk fills) to keep the table bounded.
+    `forecast_runs` is intentionally preserved: `valuations.forecast_run_id`
+    references it without cascade, and the run metadata is useful even after
+    generated paths age out. Paths for queued/running valuations are protected
+    so an in-flight LSM job cannot lose its input matrix mid-run.
     """
     from common.db import connect
 
     out: dict = {}
     with connect() as conn, conn.cursor() as cur:
+        cur.execute("set statement_timeout = '600s'")
         cur.execute("select pg_size_pretty(pg_database_size(current_database()))")
         size_row = cur.fetchone()
         out["db_size_before"] = size_row[0] if size_row else "?"
@@ -117,30 +117,42 @@ def prune_forecast_paths(retain_latest_per_area: int = 2) -> dict:
         n_runs_row = cur.fetchone()
         out["forecast_runs_before"] = int(n_runs_row[0]) if n_runs_row else 0
 
-        # Identify runs to KEEP (latest N per area). Anything else is purged.
+        # Identify runs whose generated paths may be purged. Keep the latest N
+        # per area, and keep any run currently feeding a queued/running LSM job.
         cur.execute(
             """
             with ranked as (
               select id,
-                     row_number() over (partition by area_id order by forecast_origin desc) as rn
+                     row_number() over (
+                       partition by area_id
+                       order by forecast_origin desc, created_at desc, id desc
+                     ) as rn
               from forecast_runs
             )
-            select id::text from ranked where rn > %s
+            select id::text
+            from ranked r
+            where r.rn > %s
+              and not exists (
+                select 1
+                from valuations v
+                where v.forecast_run_id = r.id
+                  and v.status in ('queued', 'running')
+              )
             """,
             (retain_latest_per_area,),
         )
         purge_ids = [r[0] for r in cur.fetchall()]
         out["runs_to_purge"] = len(purge_ids)
 
-        # Delete one run at a time — forecast_paths has ON DELETE CASCADE
-        # from forecast_run_id, so deleting the parent purges the child.
-        # Per-row commit keeps WAL small on a near-full disk.
-        deleted = 0
+        # Delete generated child rows only. Parent forecast_runs rows are
+        # referenced by valuations and should remain as durable metadata.
+        deleted_paths = 0
         for run_id in purge_ids:
-            cur.execute("delete from forecast_runs where id = %s", (run_id,))
-            deleted += cur.rowcount or 0
+            cur.execute("delete from forecast_paths where forecast_run_id = %s", (run_id,))
+            deleted_paths += cur.rowcount or 0
             conn.commit()
-        out["runs_deleted"] = deleted
+        out["path_rows_deleted"] = deleted_paths
+        out["runs_deleted"] = 0
 
         # Flush any open (even read-only) transaction so we can flip
         # autocommit — VACUUM cannot run inside a transaction block.
@@ -163,7 +175,14 @@ def prune_forecast_paths(retain_latest_per_area: int = 2) -> dict:
             r = cur2.fetchone()
             out["forecast_paths_rows_after"] = int(r[0]) if r else 0
 
+    print(f"prune_forecast_paths result: {out}")
     return out
+
+
+@app.function(image=base_image, cpu=2.0, timeout=1800, secrets=_secrets)
+def prune_forecast_paths(retain_latest_per_area: int = 2) -> dict:
+    """On-demand forecast-path retention entry point."""
+    return _prune_forecast_paths_impl(retain_latest_per_area=retain_latest_per_area)
 
 
 @app.function(image=base_image, cpu=2.0, timeout=3600, secrets=_secrets)
@@ -218,88 +237,13 @@ def vacuum_full_tables(tables_csv: str = "") -> dict:
 
 @app.function(image=base_image, cpu=2.0, timeout=3600, secrets=_secrets)
 def prune_old_data() -> dict:
-    """Trim historical data the dashboard doesn't read. Run on-demand when
-    DB nears its disk limit. Retention windows are sized to the longest
-    UI surface that reads each table.
+    """Compatibility entry point for the old retention command.
 
-    Order matters: smaller, indexed deletes first so WAL stays manageable
-    even when disk is near-full. VACUUM at the end reclaims pages.
+    Historical market, stack, and regime tables are canonical inputs for
+    training, backtests, and dashboard drill-downs, so this path now prunes
+    only generated forecast path rows.
     """
-    from datetime import UTC, datetime, timedelta
-    from common.db import connect
-
-    now = datetime.now(tz=UTC)
-    # Time-windowed DELETE on the actuals tables (no FK cascade hazard).
-    # Order: children before parents where FKs exist.
-    time_pruned = [
-        # (table, days, filter_column)
-        ("regime_states", 30, "slot_start"),
-        ("generation_mix_actuals", 90, "slot_start"),
-        ("demand_actuals", 90, "slot_start"),
-        ("jepx_spot_prices", 90, "slot_start"),
-        ("weather_obs", 14, "ts"),
-    ]
-
-    out: dict = {"deleted": {}, "truncated": []}
-    with connect() as conn, conn.cursor() as cur:
-        # Bump statement timeout so big batch deletes don't trip Supabase's
-        # default (60s).
-        cur.execute("set local statement_timeout = '600s'")
-        conn.commit()
-
-        for table, days, col in time_pruned:
-            cutoff = now - timedelta(days=days)
-            total = 0
-            batches = 0
-            while True:
-                cur.execute(
-                    f"""
-                    delete from {table}
-                    where ctid in (
-                      select ctid from {table}
-                      where {col} < %s
-                      limit 50000
-                    )
-                    """,
-                    (cutoff,),
-                )
-                n = cur.rowcount or 0
-                conn.commit()
-                total += n
-                batches += 1
-                if n < 50000 or batches > 500:
-                    break
-            out["deleted"][table] = {"rows": total, "cutoff": cutoff.isoformat()}
-            print(f"  {table}: deleted {total} rows older than {cutoff.date()}")
-
-        # The stack pair is huge (943 MB curves + 79 MB clearing) and FK-
-        # linked. Per-row DELETE triggers an FK check on every curve row.
-        # TRUNCATE … CASCADE atomically clears both at once with no FK
-        # validation per row — far faster on this scale, at the cost of
-        # losing historical stack curves. Tomorrow's stack_run_daily
-        # repopulates the current slot; older slots are rarely viewed.
-        cur.execute("truncate table stack_curves, stack_clearing_prices restart identity cascade")
-        conn.commit()
-        out["truncated"] = ["stack_curves", "stack_clearing_prices"]
-        print("  stack_curves + stack_clearing_prices: TRUNCATED")
-
-    # VACUUM (separate autocommit connection — VACUUM can't run in a tx).
-    with connect() as conn2:
-        conn2.autocommit = True
-        with conn2.cursor() as cur2:
-            all_tables = [t for t, _, _ in time_pruned] + [
-                "stack_curves", "stack_clearing_prices",
-            ]
-            for table in all_tables:
-                try:
-                    cur2.execute(f"vacuum {table}")
-                except Exception as e:  # noqa: BLE001
-                    print(f"  vacuum {table} failed: {e}")
-            cur2.execute("select pg_size_pretty(pg_database_size(current_database()))")
-            r = cur2.fetchone()
-            out["db_size_after"] = r[0] if r else "?"
-    print(f"prune_old_data result: {out}")
-    return out
+    return _prune_forecast_paths_impl(retain_latest_per_area=2)
 
 
 @app.function(image=base_image, secrets=_secrets)
@@ -528,10 +472,9 @@ def stack_run_daily() -> dict:
     except Exception as e:  # noqa: BLE001
         out["regime_infer_spawned"] = f"error: {e}"
 
-    # Nightly retention sweep. Trims actuals to ≤90 days, regime_states to
-    # ≤30 days, weather_obs to ≤14 days, and TRUNCATEs the stack pair
-    # (rebuilt by next stack run). Keeps the Supabase free-tier disk from
-    # refilling and re-triggering the May-22 outage.
+    # Nightly retention sweep for generated forecast paths only. Canonical
+    # market/stack/regime history must remain available for VLSTM features,
+    # MRS residuals, backtests, and dashboard drill-downs.
     try:
         prune_nightly.spawn()
         out["prune_spawned"] = True
@@ -574,11 +517,12 @@ def regime_infer_daily() -> dict:
 
 @app.function(image=base_image, cpu=2.0, timeout=3600, secrets=_secrets)
 def prune_nightly() -> dict:
-    """Nightly retention sweep. Trims actuals to 90d, regime_states to 30d,
-    weather_obs to 14d; TRUNCATEs the stack pair. Same body as
-    prune_old_data — spawned from stack_run_daily.
+    """Nightly retention sweep for generated forecast paths.
+
+    Spawned from stack_run_daily after the stack build; safe because it never
+    mutates the stack, market actuals, or regime history tables.
     """
-    return prune_old_data.local()
+    return _prune_forecast_paths_impl(retain_latest_per_area=2)
 
 
 @app.function(image=base_image, cpu=4.0, timeout=1800, secrets=_secrets)
