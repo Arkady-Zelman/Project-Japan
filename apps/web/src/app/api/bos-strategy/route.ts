@@ -121,19 +121,21 @@ export async function GET(request: Request) {
       power_mw: 50,
       energy_mwh: 100,
       round_trip_eff: 0.85,
-      soc_min_pct: 10,
-      soc_max_pct: 90,
+      soc_min_pct: 0.10,
+      soc_max_pct: 0.90,
     };
   }
 
   // Pull the forward curve.
   let forward: ForwardPoint[] = [];
+  let resolvedSource: "forecast" | "realised" = source;
   if (source === "forecast") {
     forward = await buildForecastCurve(supabase, area_id, horizonSlots);
   }
   // Fall back to realised if no forecast available.
   if (forward.length === 0) {
     forward = await buildRealisedCurve(supabase, area_id, horizonSlots);
+    resolvedSource = "realised";
   }
   if (forward.length === 0) {
     return NextResponse.json(
@@ -145,7 +147,7 @@ export async function GET(request: Request) {
   const result = runBoS(forward, assetSpec, { dt_hours: 0.5, corr_decay_hours: 24 });
 
   return NextResponse.json({
-    source: forward.length > 0 ? source : "realised",
+    source: resolvedSource,
     asset: {
       id: assetMeta.id,
       name: assetMeta.name,

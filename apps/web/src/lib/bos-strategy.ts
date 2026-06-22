@@ -154,13 +154,15 @@ export function runBoS(
     for (let j = i + 1; j < N; j++) {
       const fj = forward[j]!.price;
       const sj = Math.max(forward[j]!.vol, 0);
-      // Per-kWh spread: deliver eta·F_j at discharge after paying F_i to charge.
-      const spread = eta_one_way * fj - fi;
+      // Per-kWh spread for one grid-charged kWh. The discharge leg delivers
+      // eta_round_trip kWh back to the grid, matching the cashflow schedule.
+      const spread = eta_round_trip * fj - fi;
       // Per-kWh spread vol (Bachelier).
       const dh = (j - i) * dt;
       const rho = Math.exp(-dh / tau_h);
       const var_spread =
-        si * si + (sj * eta_one_way) * (sj * eta_one_way) - 2 * rho * si * (sj * eta_one_way);
+        si * si + (sj * eta_round_trip) * (sj * eta_round_trip)
+        - 2 * rho * si * (sj * eta_round_trip);
       const spread_vol = Math.sqrt(Math.max(var_spread, 0));
       // Bachelier valuation, K = 0, T = dh / 8760 (year fraction).
       const T_year = dh / 8760;
@@ -199,8 +201,10 @@ export function runBoS(
   for (const c of candidates) {
     if (basket.length >= max_csos) break;
 
-    const room_charge = max_charge_per_slot - charge_at[c.i];
-    const room_discharge = max_charge_per_slot - discharge_at[c.j];
+    // A single BESS cannot charge and discharge in the same slot. Treat any
+    // existing opposite-direction allocation as exhausting that slot.
+    const room_charge = discharge_at[c.i] > 1e-6 ? 0 : max_charge_per_slot - charge_at[c.i];
+    const room_discharge = charge_at[c.j] > 1e-6 ? 0 : max_charge_per_slot - discharge_at[c.j];
     if (room_charge <= 1e-6 || room_discharge <= 1e-6) continue;
 
     // Inventory ceiling: max additional volume we can store between i and j-1.
