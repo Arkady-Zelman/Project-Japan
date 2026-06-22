@@ -50,7 +50,7 @@ const overlappingCandidates = runBoS(
 
 const chargeSlots = new Set(overlappingCandidates.basket.map((cso) => cso.charge_ix));
 const dischargeSlots = new Set(overlappingCandidates.basket.map((cso) => cso.discharge_ix));
-for (const ix of chargeSlots) {
+for (const ix of Array.from(chargeSlots)) {
   assert.ok(
     !dischargeSlots.has(ix),
     `BoS must not charge and discharge in the same slot (${ix})`,
