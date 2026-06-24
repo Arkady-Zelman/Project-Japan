@@ -56,7 +56,8 @@ async function fetchLatestRuns(): Promise<LatestRun[]> {
   const supa = createServerClient();
   const { data, error } = await supa
     .from("compute_runs")
-    .select("kind, status, created_at, duration_ms, error, output")
+    .select("kind, status, created_at, duration_ms")
+    .is("user_id", null)
     .in("kind", [...ALL_KINDS])
     .order("created_at", { ascending: false })
     .limit(500);
@@ -66,10 +67,10 @@ async function fetchLatestRuns(): Promise<LatestRun[]> {
   }
   const seen = new Set<string>();
   const latest: LatestRun[] = [];
-  for (const row of (data ?? []) as LatestRun[]) {
+  for (const row of (data ?? []) as Omit<LatestRun, "error" | "output">[]) {
     if (seen.has(row.kind)) continue;
     seen.add(row.kind);
-    latest.push(row);
+    latest.push({ ...row, error: null, output: null });
   }
   return latest;
 }
@@ -105,7 +106,8 @@ async function fetchRecentRuns(): Promise<CronRun[]> {
   const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
   const { data, error } = await supa
     .from("compute_runs")
-    .select("kind, status, created_at, error")
+    .select("kind, status, created_at")
+    .is("user_id", null)
     .in("kind", [...ALL_KINDS])
     .gte("created_at", since)
     .order("created_at", { ascending: false })
@@ -114,7 +116,7 @@ async function fetchRecentRuns(): Promise<CronRun[]> {
     console.error("compute_runs (7d) fetch failed:", error);
     return [];
   }
-  return (data ?? []) as CronRun[];
+  return ((data ?? []) as Omit<CronRun, "error">[]).map((row) => ({ ...row, error: null }));
 }
 
 export default async function DashboardPage() {
