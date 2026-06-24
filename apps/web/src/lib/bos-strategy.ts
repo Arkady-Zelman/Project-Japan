@@ -192,7 +192,7 @@ export function runBoS(
       });
     }
   }
-  candidates.sort((a, b) => b.total_per_unit_jpy - a.total_per_unit_jpy);
+  candidates.sort((a, b) => b.intrinsic_per_unit_jpy - a.intrinsic_per_unit_jpy);
 
   const basket: CSO[] = [];
 
