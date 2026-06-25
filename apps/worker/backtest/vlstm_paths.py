@@ -67,27 +67,42 @@ def load_vlstm_paths_per_origin(
                 continue
             run_id = cast(str, row[0])
 
-            # Pull all (path_index, slot_ix, price_jpy_kwh) rows for that run.
+            # Pull available path rows from this backtest origin onward. The
+            # schema stores timestamps, not integer horizon indexes.
             cur.execute(
                 """
-                select path_index, slot_ix, price_jpy_kwh
+                select path_id, slot_start, price_jpy_kwh
                 from forecast_paths
-                where run_id = %s and slot_ix < %s
+                where forecast_run_id = %s
+                  and slot_start >= %s
+                order by slot_start, path_id
                 """,
-                (run_id, H + 1),
+                (run_id, origin_ts),
             )
             rows = cur.fetchall()
             if not rows:
                 out[i] = None
                 continue
-            # Reshape into (P, H+1).
-            max_path = max(int(r[0]) for r in rows)
-            max_slot = max(int(r[1]) for r in rows)
+
+            # Reshape into (P, S), where S is the first H+1 timestamp columns
+            # available for this origin. Forecast runs normally contain 48
+            # slots; the strategy pads any short tail at the end of a run.
+            slot_index: dict[datetime, int] = {}
+            reshaped_rows: list[tuple[int, int, float]] = []
+            for path_id, slot_start, price_kwh in rows:
+                if slot_start not in slot_index:
+                    if len(slot_index) >= H + 1:
+                        continue
+                    slot_index[slot_start] = len(slot_index)
+                reshaped_rows.append((int(path_id), slot_index[slot_start], float(price_kwh)))
+
+            max_path = max(r[0] for r in reshaped_rows)
+            max_slot = max(r[1] for r in reshaped_rows)
             P = max_path + 1
             S = max_slot + 1
             mat = np.full((P, S), np.nan, dtype=np.float64)
-            for r in rows:
-                mat[int(r[0]), int(r[1])] = float(r[2])
+            for path_id, slot_idx, price_kwh in reshaped_rows:
+                mat[path_id, slot_idx] = price_kwh
             # Drop any path rows with NaN (incomplete).
             valid = ~np.isnan(mat).any(axis=1)
             mat = mat[valid]
