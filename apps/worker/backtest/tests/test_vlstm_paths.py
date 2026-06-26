@@ -1,6 +1,14 @@
 from datetime import UTC, datetime, timedelta
+import sys
+import types
 
 import numpy as np
+
+# Keep this as a lightweight unit test in clean cloud images that do not have
+# the worker DB driver installed.
+fake_db = types.ModuleType("common.db")
+fake_db.connect = lambda: None
+sys.modules.setdefault("common.db", fake_db)
 
 from backtest import vlstm_paths
 
