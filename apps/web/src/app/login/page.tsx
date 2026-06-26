@@ -9,6 +9,7 @@
  */
 
 import { PageHeader } from "@/components/ui/page-header";
+import { sanitizeNextPath } from "@/lib/auth/redirect";
 import { LoginForm } from "./LoginForm";
 
 export const dynamic = "force-dynamic";
@@ -18,7 +19,7 @@ type Props = {
 };
 
 export default function LoginPage({ searchParams }: Props) {
-  const next = searchParams.next ?? "/workbench";
+  const next = sanitizeNextPath(searchParams.next);
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-6 py-12">
       <PageHeader
