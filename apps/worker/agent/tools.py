@@ -59,7 +59,7 @@ def query_data(args: dict, ctx: ToolContext) -> dict:
     if not ok:
         return {"success": False, "error": f"SQL rejected: {reason}"}
 
-    with compute_run("agent_tool_call") as run:
+    with compute_run("agent_tool_call", user_id=ctx.user_id) as run:
         run.set_input({"tool": "query_data", "sql": sql[:2000], "user_id": str(ctx.user_id)})
         try:
             with connect(env_var="SUPABASE_AGENT_READONLY_DB_URL") as conn, conn.cursor() as cur:
@@ -103,7 +103,7 @@ def _to_json(v: Any) -> Any:
 
 def describe_schema(args: dict, ctx: ToolContext) -> dict:
     table_name = args.get("table_name")
-    with compute_run("agent_tool_call") as run:
+    with compute_run("agent_tool_call", user_id=ctx.user_id) as run:
         run.set_input({"tool": "describe_schema", "table_name": table_name})
         with connect(env_var="SUPABASE_AGENT_READONLY_DB_URL") as conn, conn.cursor() as cur:
             if table_name:
@@ -153,7 +153,7 @@ def create_chart(args: dict, ctx: ToolContext) -> dict:
                      "(Plotly figure spec)",
         }
 
-    with compute_run("agent_tool_call") as run:
+    with compute_run("agent_tool_call", user_id=ctx.user_id) as run:
         run.set_input({"tool": "create_chart", "title": title})
         with connect() as conn, conn.cursor() as cur:
             cur.execute(
@@ -189,7 +189,7 @@ def run_correlation(args: dict, ctx: ToolContext) -> dict:
     if not ok:
         return {"success": False, "error": f"SQL rejected: {reason}"}
 
-    with compute_run("agent_tool_call") as run:
+    with compute_run("agent_tool_call", user_id=ctx.user_id) as run:
         run.set_input({"tool": "run_correlation", "method": method, "sql": sql[:1000]})
         try:
             with connect(env_var="SUPABASE_AGENT_READONLY_DB_URL") as conn, conn.cursor() as cur:
@@ -259,7 +259,7 @@ def fit_quick_model(args: dict, ctx: ToolContext) -> dict:
     if not ok:
         return {"success": False, "error": f"SQL rejected: {reason}"}
 
-    with compute_run("agent_tool_call") as run:
+    with compute_run("agent_tool_call", user_id=ctx.user_id) as run:
         run.set_input({
             "tool": "fit_quick_model", "target": target,
             "features": features, "model_type": model_type,
@@ -340,7 +340,7 @@ def value_what_if(args: dict, ctx: ToolContext) -> dict:
     if not modal_lsm:
         return {"success": False, "error": "MODAL_LSM_ENDPOINT not configured"}
 
-    with compute_run("agent_tool_call") as run:
+    with compute_run("agent_tool_call", user_id=ctx.user_id) as run:
         run.set_input({
             "tool": "value_what_if", "asset_id": str(asset_id),
             "overrides": overrides,
@@ -506,7 +506,7 @@ def value_what_if(args: dict, ctx: ToolContext) -> dict:
 
 
 def get_user_assets(args: dict, ctx: ToolContext) -> dict:
-    with compute_run("agent_tool_call") as run:
+    with compute_run("agent_tool_call", user_id=ctx.user_id) as run:
         run.set_input({"tool": "get_user_assets", "user_id": str(ctx.user_id)})
         with connect() as conn, conn.cursor() as cur:
             cur.execute(
