@@ -36,8 +36,7 @@ const MODEL_KINDS = [
 
 const COMPUTE_KINDS = [
   "stack_build",
-  "lsm_valuation",
-  "backtest",
+  "demo_asset",
 ] as const;
 
 const TABLE_SPANS: { kind: (typeof INGEST_KINDS)[number]; table: string; column: string }[] = [
@@ -52,12 +51,18 @@ const TABLE_SPANS: { kind: (typeof INGEST_KINDS)[number]; table: string; column:
 
 const ALL_KINDS = [...INGEST_KINDS, ...MODEL_KINDS, ...COMPUTE_KINDS] as const;
 
+function sanitizeError(error: string | null): string | null {
+  if (!error) return null;
+  return error.split("\n")[0]?.slice(0, 300) ?? "failed";
+}
+
 async function fetchLatestRuns(): Promise<LatestRun[]> {
   const supa = createServerClient();
   const { data, error } = await supa
     .from("compute_runs")
     .select("kind, status, created_at, duration_ms, error, output")
     .in("kind", [...ALL_KINDS])
+    .is("user_id", null)
     .order("created_at", { ascending: false })
     .limit(500);
   if (error) {
@@ -66,7 +71,8 @@ async function fetchLatestRuns(): Promise<LatestRun[]> {
   }
   const seen = new Set<string>();
   const latest: LatestRun[] = [];
-  for (const row of (data ?? []) as LatestRun[]) {
+  for (const raw of (data ?? []) as LatestRun[]) {
+    const row = { ...raw, error: sanitizeError(raw.error) };
     if (seen.has(row.kind)) continue;
     seen.add(row.kind);
     latest.push(row);
@@ -107,6 +113,7 @@ async function fetchRecentRuns(): Promise<CronRun[]> {
     .from("compute_runs")
     .select("kind, status, created_at, error")
     .in("kind", [...ALL_KINDS])
+    .is("user_id", null)
     .gte("created_at", since)
     .order("created_at", { ascending: false })
     .limit(2000);
@@ -114,7 +121,10 @@ async function fetchRecentRuns(): Promise<CronRun[]> {
     console.error("compute_runs (7d) fetch failed:", error);
     return [];
   }
-  return (data ?? []) as CronRun[];
+  return ((data ?? []) as CronRun[]).map((row) => ({
+    ...row,
+    error: sanitizeError(row.error),
+  }));
 }
 
 export default async function DashboardPage() {

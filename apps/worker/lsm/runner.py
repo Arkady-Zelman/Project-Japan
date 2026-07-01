@@ -41,6 +41,19 @@ SLOT_MINUTES = 30
 DEFAULT_HORIZON_SLOTS = 48
 
 
+def _load_valuation_audit_user(valuation_id: UUID) -> UUID | None:
+    """Return the owning user for compute_runs RLS, or None for demo rows."""
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            "select user_id::text from valuations where id = %s",
+            (str(valuation_id),),
+        )
+        row = cur.fetchone()
+    if not row or row[0] is None:
+        return None
+    return UUID(str(row[0]))
+
+
 def _load_queued_valuation(cur: psycopg.Cursor, valuation_id: UUID) -> dict:
     cur.execute(
         """
@@ -155,14 +168,17 @@ def _load_forecast_paths(
 
 def run_valuation(valuation_id: UUID) -> ValuationResult:
     """End-to-end. Persists all rows. Updates status. Audits via compute_runs."""
-    with compute_run("lsm_valuation") as run:
+    audit_user_id = _load_valuation_audit_user(valuation_id)
+    with compute_run("lsm_valuation", user_id=audit_user_id) as run:
         run.set_input({"valuation_id": str(valuation_id)})
 
         with connect() as conn, conn.cursor() as cur:
             advisory_lock(cur, f"lsm_{valuation_id}")
             v = _load_queued_valuation(cur, valuation_id)
             if v["status"] != "queued":
-                logger.warning("valuation %s already in status=%s", valuation_id, v["status"])
+                raise RuntimeError(
+                    f"valuation {valuation_id} is status={v['status']}; expected queued"
+                )
 
             asset = _load_asset(cur, v["asset_id"])
             paths_mwh, slot_starts = _load_forecast_paths(cur, v["forecast_run_id"])
@@ -266,6 +282,7 @@ def mark_failed(valuation_id: UUID, error_text: str) -> None:
                   error = %s,
                   completed_at = now()
                 where id = %s
+                  and status in ('queued', 'running')
                 """,
                 (error_text[:2000], str(valuation_id)),
             )
