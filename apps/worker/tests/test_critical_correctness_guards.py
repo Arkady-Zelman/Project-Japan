@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+import importlib
 from pathlib import Path
+import sys
+import types
 
 import numpy as np
 
@@ -104,10 +107,14 @@ class _FakeConnection:
 
 
 def test_vlstm_loader_uses_current_forecast_paths_schema(monkeypatch) -> None:
-    from backtest import vlstm_paths
-
     origin = datetime(2026, 7, 6, tzinfo=UTC)
     cursor = _FakeCursor(origin)
+    fake_common_db = types.ModuleType("common.db")
+    fake_common_db.connect = lambda: _FakeConnection(cursor)
+    monkeypatch.setitem(sys.modules, "common.db", fake_common_db)
+
+    sys.modules.pop("backtest.vlstm_paths", None)
+    vlstm_paths = importlib.import_module("backtest.vlstm_paths")
     monkeypatch.setattr(vlstm_paths, "connect", lambda: _FakeConnection(cursor))
 
     paths = vlstm_paths.load_vlstm_paths_per_origin(
