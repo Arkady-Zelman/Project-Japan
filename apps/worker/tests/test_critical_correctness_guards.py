@@ -68,7 +68,7 @@ class _FakeCursor:
 
         assert "path_index" not in sql
         assert "slot_ix" not in sql
-        assert "run_id =" not in sql
+        assert "where run_id =" not in sql.lower()
         assert "forecast_run_id = %s" in sql
         assert "slot_start >= %s" in sql
 
