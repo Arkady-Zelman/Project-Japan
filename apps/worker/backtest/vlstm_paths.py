@@ -70,7 +70,7 @@ def load_vlstm_paths_per_origin(
 
             # Pull current-schema forecast_paths rows for the requested
             # backtest origin. A forecast_run may pre-date the roll origin, so
-            # align by timestamp instead of obsolete synthetic slot_ix fields.
+            # align by timestamp instead of obsolete synthetic slot-index fields.
             cur.execute(
                 """
                 select path_id, slot_start, price_jpy_kwh
@@ -90,10 +90,10 @@ def load_vlstm_paths_per_origin(
             path_ids = sorted({int(r[0]) for r in rows})
             slot_order = sorted({cast(datetime, r[1]) for r in rows})
             path_ix = {path_id: ix for ix, path_id in enumerate(path_ids)}
-            slot_ix = {slot_start: ix for ix, slot_start in enumerate(slot_order)}
+            slot_index_by_start = {slot_start: ix for ix, slot_start in enumerate(slot_order)}
             mat = np.full((len(path_ids), len(slot_order)), np.nan, dtype=np.float64)
             for path_id, slot_start, price_jpy_kwh in rows:
-                mat[path_ix[int(path_id)], slot_ix[cast(datetime, slot_start)]] = float(
+                mat[path_ix[int(path_id)], slot_index_by_start[cast(datetime, slot_start)]] = float(
                     price_jpy_kwh
                 )
             # Drop any path rows with NaN (incomplete).
