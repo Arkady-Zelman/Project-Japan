@@ -11,7 +11,7 @@ that slot — the LSMVLSTMStrategy falls back to stack-driven forecasts.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import cast
 
 import numpy as np
@@ -66,28 +66,36 @@ def load_vlstm_paths_per_origin(
                 out[i] = None
                 continue
             run_id = cast(str, row[0])
+            horizon_end = origin_ts + timedelta(minutes=30 * (H + 1))
 
-            # Pull all (path_index, slot_ix, price_jpy_kwh) rows for that run.
+            # Pull current-schema forecast_paths rows for the requested
+            # backtest origin. A forecast_run may pre-date the roll origin, so
+            # align by timestamp instead of obsolete synthetic slot_ix fields.
             cur.execute(
                 """
-                select path_index, slot_ix, price_jpy_kwh
+                select path_id, slot_start, price_jpy_kwh
                 from forecast_paths
-                where run_id = %s and slot_ix < %s
+                where forecast_run_id = %s
+                  and slot_start >= %s
+                  and slot_start < %s
+                order by slot_start, path_id
                 """,
-                (run_id, H + 1),
+                (run_id, origin_ts, horizon_end),
             )
             rows = cur.fetchall()
             if not rows:
                 out[i] = None
                 continue
-            # Reshape into (P, H+1).
-            max_path = max(int(r[0]) for r in rows)
-            max_slot = max(int(r[1]) for r in rows)
-            P = max_path + 1
-            S = max_slot + 1
-            mat = np.full((P, S), np.nan, dtype=np.float64)
-            for r in rows:
-                mat[int(r[0]), int(r[1])] = float(r[2])
+            # Reshape into dense (P, S) using actual path IDs and timestamps.
+            path_ids = sorted({int(r[0]) for r in rows})
+            slot_order = sorted({cast(datetime, r[1]) for r in rows})
+            path_ix = {path_id: ix for ix, path_id in enumerate(path_ids)}
+            slot_ix = {slot_start: ix for ix, slot_start in enumerate(slot_order)}
+            mat = np.full((len(path_ids), len(slot_order)), np.nan, dtype=np.float64)
+            for path_id, slot_start, price_jpy_kwh in rows:
+                mat[path_ix[int(path_id)], slot_ix[cast(datetime, slot_start)]] = float(
+                    price_jpy_kwh
+                )
             # Drop any path rows with NaN (incomplete).
             valid = ~np.isnan(mat).any(axis=1)
             mat = mat[valid]
