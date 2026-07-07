@@ -63,7 +63,7 @@ const MODEL_KINDS = [
   "vlstm_train",
   "forecast_inference",
 ];
-const COMPUTE_KINDS = ["stack_build", "lsm_valuation", "backtest"];
+const COMPUTE_KINDS = ["stack_build", "forecast_path_retention", "demo_asset"];
 const ALL_KINDS = [...INGEST_KINDS, ...MODEL_KINDS, ...COMPUTE_KINDS];
 
 export function DashboardClient({

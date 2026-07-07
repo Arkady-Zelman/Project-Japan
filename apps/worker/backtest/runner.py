@@ -32,6 +32,16 @@ logger = logging.getLogger("backtest.runner")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 
+def _load_backtest_owner(backtest_id: UUID) -> UUID | None:
+    """Return the owning user for audit scoping; demo backtests have no user."""
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute("select user_id from backtests where id = %s", (str(backtest_id),))
+        row = cur.fetchone()
+    if not row or row[0] is None:
+        return None
+    return UUID(str(row[0]))
+
+
 def _load_backtest_row(cur: psycopg.Cursor, backtest_id: UUID) -> dict:
     cur.execute(
         """
@@ -196,7 +206,8 @@ def run_backtest(
     naive_sell: float | None = None,
 ) -> BacktestResult:
     """End-to-end backtest. Persists all metrics + trade rows. Audits via compute_runs."""
-    with compute_run("backtest") as run:
+    owner_id = _load_backtest_owner(backtest_id)
+    with compute_run("backtest", user_id=owner_id) as run:
         run.set_input({
             "backtest_id": str(backtest_id),
             "spread_jpy_kwh": spread_jpy_kwh,
@@ -205,6 +216,10 @@ def run_backtest(
         with connect() as conn, conn.cursor() as cur:
             advisory_lock(cur, f"backtest_{backtest_id}")
             row = _load_backtest_row(cur, backtest_id)
+            if row["status"] != "queued":
+                raise RuntimeError(
+                    f"backtest {backtest_id} is status={row['status']}; expected queued"
+                )
             asset = _load_asset_spec(cur, row["asset_id"])
             area_id = _load_asset_area(cur, row["asset_id"])
             realised_kwh, stack_kwh, slot_starts = _load_window_prices(
@@ -312,7 +327,11 @@ def _mark_failed(backtest_id: UUID, error_text: str) -> None:
     try:
         with connect() as conn, conn.cursor() as cur:
             cur.execute(
-                "update backtests set status='failed', error=%s, completed_at=now() where id = %s",
+                """
+                update backtests set status='failed', error=%s, completed_at=now()
+                 where id = %s
+                   and status in ('queued', 'running')
+                """,
                 (error_text[:2000], str(backtest_id)),
             )
             conn.commit()
