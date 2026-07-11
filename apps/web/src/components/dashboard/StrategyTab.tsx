@@ -105,6 +105,9 @@ export function StrategyTab() {
       const j = await r.json();
       if (!r.ok) throw new Error(j?.error?.toString() ?? r.statusText);
       setData(j as BoSResponse);
+      if (j?.source && j.source !== source) {
+        setSource(j.source as Forecast);
+      }
     } catch (e) {
       setError(String(e));
       setData(null);
