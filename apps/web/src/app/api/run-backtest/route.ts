@@ -20,6 +20,7 @@ import { z } from "zod";
 import { createServerClient, createSessionClient } from "@/lib/supabase/server";
 
 const MODAL_BACKTEST_ENDPOINT = process.env.MODAL_BACKTEST_ENDPOINT;
+const MODAL_API_TOKEN = process.env.MODAL_API_TOKEN;
 
 const requestSchema = z.object({
   asset_id: z.string().uuid(),
@@ -40,6 +41,12 @@ export async function POST(request: Request) {
   const userId = userData.user?.id;
   if (!userId) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+  if (MODAL_BACKTEST_ENDPOINT && !MODAL_API_TOKEN) {
+    return NextResponse.json(
+      { error: "MODAL_API_TOKEN not configured" },
+      { status: 500 },
+    );
   }
   let body: unknown;
   try {
@@ -119,7 +126,10 @@ export async function POST(request: Request) {
     for (const row of inserted) {
       fetch(MODAL_BACKTEST_ENDPOINT, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${MODAL_API_TOKEN}`,
+        },
         body: JSON.stringify({
           backtest_id: row.id,
           spread_jpy_kwh,

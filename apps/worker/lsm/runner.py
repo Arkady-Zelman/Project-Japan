@@ -162,7 +162,9 @@ def run_valuation(valuation_id: UUID) -> ValuationResult:
             advisory_lock(cur, f"lsm_{valuation_id}")
             v = _load_queued_valuation(cur, valuation_id)
             if v["status"] != "queued":
-                logger.warning("valuation %s already in status=%s", valuation_id, v["status"])
+                raise RuntimeError(
+                    f"valuation {valuation_id} is status={v['status']}; expected queued",
+                )
 
             asset = _load_asset(cur, v["asset_id"])
             paths_mwh, slot_starts = _load_forecast_paths(cur, v["forecast_run_id"])
@@ -266,6 +268,7 @@ def mark_failed(valuation_id: UUID, error_text: str) -> None:
                   error = %s,
                   completed_at = now()
                 where id = %s
+                  and status in ('queued', 'running')
                 """,
                 (error_text[:2000], str(valuation_id)),
             )

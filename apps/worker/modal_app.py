@@ -26,8 +26,11 @@ share infrastructure from `apps/worker/common/`.
 
 from __future__ import annotations
 
+import hmac
+import os
 from datetime import UTC, date, datetime, timedelta
 
+from fastapi import Header, HTTPException
 import modal
 
 app = modal.App("jepx-storage")
@@ -83,6 +86,16 @@ base_image = (
 _secrets = [modal.Secret.from_name("jepx-supabase")]
 
 
+def _require_modal_api_token(authorization: str | None) -> None:
+    """Require the shared bearer token on public Modal HTTP endpoints."""
+    expected = os.environ.get("MODAL_API_TOKEN")
+    if not expected:
+        raise HTTPException(status_code=500, detail="MODAL_API_TOKEN not configured")
+    scheme, _, token = (authorization or "").partition(" ")
+    if scheme.lower() != "bearer" or not hmac.compare_digest(token, expected):
+        raise HTTPException(status_code=401, detail="unauthorized")
+
+
 # ---------------------------------------------------------------------------
 # Healthcheck
 # ---------------------------------------------------------------------------
@@ -103,6 +116,16 @@ def prune_forecast_paths(retain_latest_per_area: int = 2) -> dict:
     pruning, that grows ~432K/day on the Supabase free tier (500 MB). Run
     nightly (or on-demand when disk fills) to keep the table bounded.
     """
+    return _prune_forecast_paths_impl(retain_latest_per_area)
+
+
+def _prune_forecast_paths_impl(retain_latest_per_area: int = 2) -> dict:
+    """Prune generated forecast path rows without deleting forecast_runs.
+
+    `valuations.forecast_run_id` references forecast_runs without cascade, so
+    deleting parent runs can fail or break historical valuation provenance.
+    The path rows are the large generated artefact; parent run metadata is tiny.
+    """
     from common.db import connect
 
     out: dict = {}
@@ -117,7 +140,8 @@ def prune_forecast_paths(retain_latest_per_area: int = 2) -> dict:
         n_runs_row = cur.fetchone()
         out["forecast_runs_before"] = int(n_runs_row[0]) if n_runs_row else 0
 
-        # Identify runs to KEEP (latest N per area). Anything else is purged.
+        # Identify old runs whose child path rows can be pruned. Protect
+        # queued/running valuations so in-flight LSM jobs keep their inputs.
         cur.execute(
             """
             with ranked as (
@@ -125,22 +149,29 @@ def prune_forecast_paths(retain_latest_per_area: int = 2) -> dict:
                      row_number() over (partition by area_id order by forecast_origin desc) as rn
               from forecast_runs
             )
-            select id::text from ranked where rn > %s
+            select r.id::text
+            from ranked r
+            where r.rn > %s
+              and not exists (
+                select 1
+                from valuations v
+                where v.forecast_run_id = r.id
+                  and v.status in ('queued', 'running')
+              )
             """,
             (retain_latest_per_area,),
         )
-        purge_ids = [r[0] for r in cur.fetchall()]
-        out["runs_to_purge"] = len(purge_ids)
+        prune_ids = [r[0] for r in cur.fetchall()]
+        out["runs_to_prune"] = len(prune_ids)
 
-        # Delete one run at a time — forecast_paths has ON DELETE CASCADE
-        # from forecast_run_id, so deleting the parent purges the child.
-        # Per-row commit keeps WAL small on a near-full disk.
-        deleted = 0
-        for run_id in purge_ids:
-            cur.execute("delete from forecast_runs where id = %s", (run_id,))
-            deleted += cur.rowcount or 0
+        # Delete child rows only. Commit per run to keep WAL bounded when disk
+        # is already near full; forecast_runs rows are preserved for provenance.
+        deleted_paths = 0
+        for run_id in prune_ids:
+            cur.execute("delete from forecast_paths where forecast_run_id = %s", (run_id,))
+            deleted_paths += cur.rowcount or 0
             conn.commit()
-        out["runs_deleted"] = deleted
+        out["forecast_paths_deleted"] = deleted_paths
 
         # Flush any open (even read-only) transaction so we can flip
         # autocommit — VACUUM cannot run inside a transaction block.
@@ -154,7 +185,6 @@ def prune_forecast_paths(retain_latest_per_area: int = 2) -> dict:
         conn2.autocommit = True
         with conn2.cursor() as cur2:
             cur2.execute("vacuum forecast_paths")
-            cur2.execute("vacuum forecast_runs")
 
             cur2.execute("select pg_size_pretty(pg_database_size(current_database()))")
             r = cur2.fetchone()
@@ -218,86 +248,21 @@ def vacuum_full_tables(tables_csv: str = "") -> dict:
 
 @app.function(image=base_image, cpu=2.0, timeout=3600, secrets=_secrets)
 def prune_old_data() -> dict:
-    """Trim historical data the dashboard doesn't read. Run on-demand when
-    DB nears its disk limit. Retention windows are sized to the longest
-    UI surface that reads each table.
+    """Bound generated forecast-path storage without deleting market history.
 
-    Order matters: smaller, indexed deletes first so WAL stays manageable
-    even when disk is near-full. VACUUM at the end reclaims pages.
+    Canonical actuals and stack/regime tables feed backtests, calibration, and
+    VLSTM features. Nightly retention must not truncate or time-prune them.
     """
-    from datetime import UTC, datetime, timedelta
-    from common.db import connect
-
-    now = datetime.now(tz=UTC)
-    # Time-windowed DELETE on the actuals tables (no FK cascade hazard).
-    # Order: children before parents where FKs exist.
-    time_pruned = [
-        # (table, days, filter_column)
-        ("regime_states", 30, "slot_start"),
-        ("generation_mix_actuals", 90, "slot_start"),
-        ("demand_actuals", 90, "slot_start"),
-        ("jepx_spot_prices", 90, "slot_start"),
-        ("weather_obs", 14, "ts"),
+    out = _prune_forecast_paths_impl(retain_latest_per_area=2)
+    out["preserved_tables"] = [
+        "jepx_spot_prices",
+        "demand_actuals",
+        "generation_mix_actuals",
+        "weather_obs",
+        "stack_curves",
+        "stack_clearing_prices",
+        "regime_states",
     ]
-
-    out: dict = {"deleted": {}, "truncated": []}
-    with connect() as conn, conn.cursor() as cur:
-        # Bump statement timeout so big batch deletes don't trip Supabase's
-        # default (60s).
-        cur.execute("set local statement_timeout = '600s'")
-        conn.commit()
-
-        for table, days, col in time_pruned:
-            cutoff = now - timedelta(days=days)
-            total = 0
-            batches = 0
-            while True:
-                cur.execute(
-                    f"""
-                    delete from {table}
-                    where ctid in (
-                      select ctid from {table}
-                      where {col} < %s
-                      limit 50000
-                    )
-                    """,
-                    (cutoff,),
-                )
-                n = cur.rowcount or 0
-                conn.commit()
-                total += n
-                batches += 1
-                if n < 50000 or batches > 500:
-                    break
-            out["deleted"][table] = {"rows": total, "cutoff": cutoff.isoformat()}
-            print(f"  {table}: deleted {total} rows older than {cutoff.date()}")
-
-        # The stack pair is huge (943 MB curves + 79 MB clearing) and FK-
-        # linked. Per-row DELETE triggers an FK check on every curve row.
-        # TRUNCATE … CASCADE atomically clears both at once with no FK
-        # validation per row — far faster on this scale, at the cost of
-        # losing historical stack curves. Tomorrow's stack_run_daily
-        # repopulates the current slot; older slots are rarely viewed.
-        cur.execute("truncate table stack_curves, stack_clearing_prices restart identity cascade")
-        conn.commit()
-        out["truncated"] = ["stack_curves", "stack_clearing_prices"]
-        print("  stack_curves + stack_clearing_prices: TRUNCATED")
-
-    # VACUUM (separate autocommit connection — VACUUM can't run in a tx).
-    with connect() as conn2:
-        conn2.autocommit = True
-        with conn2.cursor() as cur2:
-            all_tables = [t for t, _, _ in time_pruned] + [
-                "stack_curves", "stack_clearing_prices",
-            ]
-            for table in all_tables:
-                try:
-                    cur2.execute(f"vacuum {table}")
-                except Exception as e:  # noqa: BLE001
-                    print(f"  vacuum {table} failed: {e}")
-            cur2.execute("select pg_size_pretty(pg_database_size(current_database()))")
-            r = cur2.fetchone()
-            out["db_size_after"] = r[0] if r else "?"
     print(f"prune_old_data result: {out}")
     return out
 
@@ -528,10 +493,9 @@ def stack_run_daily() -> dict:
     except Exception as e:  # noqa: BLE001
         out["regime_infer_spawned"] = f"error: {e}"
 
-    # Nightly retention sweep. Trims actuals to ≤90 days, regime_states to
-    # ≤30 days, weather_obs to ≤14 days, and TRUNCATEs the stack pair
-    # (rebuilt by next stack run). Keeps the Supabase free-tier disk from
-    # refilling and re-triggering the May-22 outage.
+    # Nightly retention sweep for generated forecast path rows. Canonical
+    # market/stack/regime tables are preserved because downstream calibration,
+    # backtests, and VLSTM inference depend on their history.
     try:
         prune_nightly.spawn()
         out["prune_spawned"] = True
@@ -574,10 +538,7 @@ def regime_infer_daily() -> dict:
 
 @app.function(image=base_image, cpu=2.0, timeout=3600, secrets=_secrets)
 def prune_nightly() -> dict:
-    """Nightly retention sweep. Trims actuals to 90d, regime_states to 30d,
-    weather_obs to 14d; TRUNCATEs the stack pair. Same body as
-    prune_old_data — spawned from stack_run_daily.
-    """
+    """Nightly retention sweep for generated forecast path rows only."""
     return prune_old_data.local()
 
 
@@ -798,7 +759,7 @@ def forecast_vlstm_evening() -> dict:
 
 @app.function(image=base_image, cpu=4.0, timeout=600, secrets=_secrets)
 @modal.fastapi_endpoint(method="POST", label="lsm-value")
-def lsm_value(payload: dict) -> dict:
+def lsm_value(payload: dict, authorization: str | None = Header(default=None)) -> dict:
     """On-demand LSM valuation. Body: `{"valuation_id": "<uuid>"}`.
 
     Returns the headline numbers; full per-slot decisions are written to
@@ -811,6 +772,7 @@ def lsm_value(payload: dict) -> dict:
     from lsm.runner import mark_failed, run_valuation
 
     init_sentry()
+    _require_modal_api_token(authorization)
     valuation_id_str = payload.get("valuation_id")
     if not valuation_id_str:
         return {"error": "valuation_id required"}
@@ -856,7 +818,7 @@ def lsm_value_run(valuation_id: str) -> dict:
 
 @app.function(image=base_image, cpu=4.0, timeout=900, secrets=_secrets)
 @modal.fastapi_endpoint(method="POST", label="run-backtest")
-def run_backtest(payload: dict) -> dict:
+def run_backtest(payload: dict, authorization: str | None = Header(default=None)) -> dict:
     """On-demand strategy backtest. Body: `{"backtest_id": "<uuid>", "spread_jpy_kwh": 2.0?}`.
 
     Returns the headline metrics; full per-slot trade rows are persisted
@@ -870,6 +832,7 @@ def run_backtest(payload: dict) -> dict:
     from common.sentry import init_sentry
 
     init_sentry()
+    _require_modal_api_token(authorization)
     backtest_id_str = payload.get("backtest_id")
     if not backtest_id_str:
         return {"error": "backtest_id required"}
