@@ -11,7 +11,6 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-
 MODAL_APP = Path(__file__).resolve().parents[1] / "modal_app.py"
 
 CANONICAL_HISTORY_TABLES = {
