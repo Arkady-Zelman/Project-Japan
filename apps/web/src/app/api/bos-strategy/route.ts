@@ -121,19 +121,21 @@ export async function GET(request: Request) {
       power_mw: 50,
       energy_mwh: 100,
       round_trip_eff: 0.85,
-      soc_min_pct: 10,
-      soc_max_pct: 90,
+      soc_min_pct: 0.1,
+      soc_max_pct: 0.9,
     };
   }
 
   // Pull the forward curve.
   let forward: ForwardPoint[] = [];
+  let resolvedSource = source;
   if (source === "forecast") {
     forward = await buildForecastCurve(supabase, area_id, horizonSlots);
   }
   // Fall back to realised if no forecast available.
   if (forward.length === 0) {
     forward = await buildRealisedCurve(supabase, area_id, horizonSlots);
+    resolvedSource = "realised";
   }
   if (forward.length === 0) {
     return NextResponse.json(
@@ -145,7 +147,7 @@ export async function GET(request: Request) {
   const result = runBoS(forward, assetSpec, { dt_hours: 0.5, corr_decay_hours: 24 });
 
   return NextResponse.json({
-    source: forward.length > 0 ? source : "realised",
+    source: resolvedSource,
     asset: {
       id: assetMeta.id,
       name: assetMeta.name,
@@ -171,7 +173,7 @@ async function buildForecastCurve(
 ): Promise<ForwardPoint[]> {
   const { data: run } = await supabase
     .from("forecast_runs")
-    .select("id, forecast_origin, horizon_slots")
+    .select("id, forecast_origin, horizon_slots, n_paths")
     .eq("area_id", area_id)
     .order("forecast_origin", { ascending: false })
     .limit(1)
@@ -183,6 +185,7 @@ async function buildForecastCurve(
   // is smaller: requested horizon, or the run's actual horizon_slots.
   const usedHorizon = Math.min(horizon_slots, Number(run.horizon_slots) || horizon_slots);
   const horizonEnd = new Date(origin.getTime() + usedHorizon * 30 * 60 * 1000).toISOString();
+  const expectedRows = Number(run.n_paths) * usedHorizon;
 
   // Pull all path × slot rows for that run within the horizon. Supabase
   // server-side caps at ~1000 rows/page, so paginate via .range until done.
@@ -194,18 +197,23 @@ async function buildForecastCurve(
   for (let page = 0; page < 200; page++) {
     const { data, error } = await supabase
       .from("forecast_paths")
-      .select("slot_start, price_jpy_kwh")
+      .select("path_id, slot_start, price_jpy_kwh")
       .eq("forecast_run_id", run.id)
       .lt("slot_start", horizonEnd)
+      .order("slot_start", { ascending: true })
+      .order("path_id", { ascending: true })
       .range(from, from + pageSize - 1);
-    if (error || !data || data.length === 0) break;
+    if (error) return [];
+    if (!data || data.length === 0) break;
     for (const r of data as { slot_start: string; price_jpy_kwh: number | string }[]) {
       all.push({ slot_start: r.slot_start, price_jpy_kwh: Number(r.price_jpy_kwh) });
     }
     if (data.length < pageSize) break;
     from += pageSize;
   }
-  if (all.length === 0) return [];
+  // Never optimise against a partial ensemble: a transient page failure or
+  // partially retained run would bias both the per-slot mean and volatility.
+  if (all.length !== expectedRows) return [];
 
   // Aggregate to mean + stdev per slot_start, derive `ix` from time offset.
   const by_slot = new Map<string, number[]>();
