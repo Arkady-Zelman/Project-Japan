@@ -13,6 +13,9 @@ from pathlib import Path
 MODULE_PATH = Path(__file__).parents[1] / "modal_app.py"
 SOURCE = MODULE_PATH.read_text(encoding="utf-8")
 TREE = ast.parse(SOURCE)
+LSM_RUNNER_SOURCE = (
+    Path(__file__).parents[1] / "lsm/runner.py"
+).read_text(encoding="utf-8").lower()
 
 
 def _function_source(name: str) -> str:
@@ -52,7 +55,16 @@ def test_retention_never_deletes_canonical_historical_tables() -> None:
 def test_forecast_retention_preserves_run_metadata_and_active_inputs() -> None:
     source = _function_source("_prune_forecast_paths").lower()
 
-    assert "delete from forecast_paths where forecast_run_id = %s" in source
+    assert "delete from forecast_paths fp" in source
     assert "delete from forecast_runs" not in source
-    assert "from valuations" in source
-    assert "v.status in ('queued', 'running')" in source
+    # The active-valuation exclusion is checked when candidates are selected
+    # and again atomically in each DELETE statement.
+    assert source.count("from valuations") == 2
+    assert source.count("v.status in ('queued', 'running')") == 2
+
+
+def test_lsm_fails_closed_for_pruned_paths_and_duplicate_runs() -> None:
+    assert "raise runtimeerror(" in LSM_RUNNER_SOURCE
+    assert "incomplete forecast paths:" in LSM_RUNNER_SOURCE
+    assert "expected queued" in LSM_RUNNER_SOURCE
+    assert "and status in ('queued', 'running')" in LSM_RUNNER_SOURCE

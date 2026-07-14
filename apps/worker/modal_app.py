@@ -156,7 +156,16 @@ def _prune_forecast_paths(retain_latest_per_area: int = 2) -> dict:
         deleted_paths = 0
         for run_id in prune_ids:
             cur.execute(
-                "delete from forecast_paths where forecast_run_id = %s",
+                """
+                delete from forecast_paths fp
+                where fp.forecast_run_id = %s
+                  and not exists (
+                    select 1
+                    from valuations v
+                    where v.forecast_run_id = fp.forecast_run_id
+                      and v.status in ('queued', 'running')
+                  )
+                """,
                 (run_id,),
             )
             deleted_paths += cur.rowcount or 0
