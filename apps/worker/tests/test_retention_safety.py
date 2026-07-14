@@ -9,7 +9,6 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-
 MODULE_PATH = Path(__file__).parents[1] / "modal_app.py"
 SOURCE = MODULE_PATH.read_text(encoding="utf-8")
 TREE = ast.parse(SOURCE)

@@ -522,6 +522,7 @@ def regime_infer_daily() -> dict:
     Regime tab's posteriors stay current between the weekly recalibrations.
     Operator can also run on demand: modal run modal_app.py::regime_infer_daily."""
     from datetime import UTC, datetime, timedelta
+
     from common.sentry import init_sentry
     from regime.infer_state import run_all
 

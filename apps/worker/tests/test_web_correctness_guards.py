@@ -2,7 +2,6 @@
 
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).parents[3]
 BOS_ROUTE = (
     REPO_ROOT / "apps/web/src/app/api/bos-strategy/route.ts"
