@@ -53,4 +53,3 @@ def test_legacy_and_nightly_entrypoints_use_safe_path_retention() -> None:
     for name in ("prune_old_data", "prune_nightly"):
         source = _function_source(name)
         assert "prune_forecast_paths.local()" in source
-
