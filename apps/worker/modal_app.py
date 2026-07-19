@@ -438,11 +438,12 @@ def ingest_backfill(
 # 21:30 UTC = 06:30 JST. Fires 30 min after `ingest_daily` so all the
 # input tables are fresh.
 _STACK_DAILY_CRON = modal.Cron("30 21 * * *")
+_STACK_DAILY_LOOKBACK_DAYS = 8
 
 
 @app.function(image=base_image, cpu=2.0, timeout=900, schedule=_STACK_DAILY_CRON, secrets=_secrets)
 def stack_run_daily() -> dict:
-    """Build merit-order curves for yesterday across every area.
+    """Build recent merit-order curves across every area.
 
     Also fires the public-demo refresh (`demo_daily`) so the /workbench and
     /lab pages always show last-24h results without needing a real user
@@ -454,8 +455,8 @@ def stack_run_daily() -> dict:
 
     init_sentry()
     today = datetime.now(tz=UTC).date()
-    yesterday = today - timedelta(days=1)
-    out = build_window(yesterday, today)
+    start = today - timedelta(days=_STACK_DAILY_LOOKBACK_DAYS)
+    out = build_window(start, today)
 
     try:
         demo_daily.spawn()
