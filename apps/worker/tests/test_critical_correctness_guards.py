@@ -63,5 +63,5 @@ def test_daily_stack_build_restores_model_lookback() -> None:
     stack_source = _function_source("stack_run_daily")
 
     assert "_STACK_DAILY_LOOKBACK_DAYS = 8" in source
-    assert "timedelta(days=_STACK_DAILY_LOOKBACK_DAYS)" in stack_source
+    assert "timedelta(days=_stack_daily_lookback_days)" in stack_source
     assert "timedelta(days=1)" not in stack_source
