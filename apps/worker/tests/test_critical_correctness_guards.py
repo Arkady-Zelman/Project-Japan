@@ -56,3 +56,12 @@ def test_forecast_retention_preserves_active_valuation_inputs() -> None:
     assert "delete from forecast_paths" in source
     assert "from valuations" in source
     assert "status in ('queued', 'running')" in source
+
+
+def test_daily_stack_build_restores_model_lookback() -> None:
+    source = MODAL_APP.read_text()
+    stack_source = _function_source("stack_run_daily")
+
+    assert "_STACK_DAILY_LOOKBACK_DAYS = 8" in source
+    assert "timedelta(days=_STACK_DAILY_LOOKBACK_DAYS)" in stack_source
+    assert "timedelta(days=1)" not in stack_source
