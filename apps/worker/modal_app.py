@@ -108,6 +108,9 @@ def prune_forecast_paths(retain_latest_per_area: int = 2) -> dict:
     """
     from common.db import connect
 
+    if retain_latest_per_area < 1:
+        raise ValueError("retain_latest_per_area must be at least 1")
+
     out: dict = {}
     with connect() as conn, conn.cursor() as cur:
         cur.execute("select pg_size_pretty(pg_database_size(current_database()))")
@@ -126,7 +129,10 @@ def prune_forecast_paths(retain_latest_per_area: int = 2) -> dict:
             """
             with ranked as (
               select id,
-                     row_number() over (partition by area_id order by forecast_origin desc) as rn
+                     row_number() over (
+                       partition by area_id
+                       order by forecast_origin desc, created_at desc, id desc
+                     ) as rn
               from forecast_runs
             ),
             protected as (
@@ -151,7 +157,19 @@ def prune_forecast_paths(retain_latest_per_area: int = 2) -> dict:
         # while preserving forecast_runs rows referenced by valuations.
         deleted = 0
         for run_id in prune_ids:
-            cur.execute("delete from forecast_paths where forecast_run_id = %s", (run_id,))
+            cur.execute(
+                """
+                delete from forecast_paths fp
+                where fp.forecast_run_id = %s
+                  and not exists (
+                    select 1
+                    from valuations v
+                    where v.forecast_run_id = fp.forecast_run_id
+                      and v.status in ('queued', 'running')
+                  )
+                """,
+                (run_id,),
+            )
             deleted += cur.rowcount or 0
             conn.commit()
         out["forecast_path_rows_deleted"] = deleted

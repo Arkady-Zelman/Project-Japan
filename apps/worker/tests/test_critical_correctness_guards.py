@@ -52,9 +52,11 @@ def test_retention_never_deletes_canonical_history_tables() -> None:
 def test_forecast_retention_preserves_active_valuation_inputs() -> None:
     source = _function_source("prune_forecast_paths")
 
-    assert "delete from forecast_paths" in source
-    assert "from valuations" in source
-    assert "status in ('queued', 'running')" in source
+    assert "delete from forecast_paths fp" in source
+    # Check active references both when selecting candidates and again in the
+    # DELETE statement, closing the selection-to-deletion race.
+    assert source.count("from valuations") == 2
+    assert source.count("status in ('queued', 'running')") == 2
 
 
 def test_daily_stack_build_restores_model_lookback() -> None:
