@@ -65,3 +65,14 @@ def test_daily_stack_build_restores_model_lookback() -> None:
     assert "_STACK_DAILY_LOOKBACK_DAYS = 8" in source
     assert "timedelta(days=_stack_daily_lookback_days)" in stack_source
     assert "timedelta(days=1)" not in stack_source
+
+
+def test_demo_refresh_waits_for_fresh_tokyo_forecast() -> None:
+    stack_source = _function_source("stack_run_daily")
+    forecast_source = _function_source("forecast_vlstm_morning")
+
+    assert "demo_daily.spawn" not in stack_source
+    assert '"tk" not in run_ids' in forecast_source
+    assert forecast_source.index("result = run_inference()") < forecast_source.index(
+        "demo_daily.spawn()"
+    )

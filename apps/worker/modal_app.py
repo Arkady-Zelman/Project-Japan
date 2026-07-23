@@ -443,13 +443,7 @@ _STACK_DAILY_LOOKBACK_DAYS = 8
 
 @app.function(image=base_image, cpu=2.0, timeout=900, schedule=_STACK_DAILY_CRON, secrets=_secrets)
 def stack_run_daily() -> dict:
-    """Build recent merit-order curves across every area.
-
-    Also fires the public-demo refresh (`demo_daily`) so the /workbench and
-    /lab pages always show last-24h results without needing a real user
-    session. Demo is fire-and-forget (`.spawn`) so stack runtime isn't
-    affected by LSM/backtest latency.
-    """
+    """Build recent merit-order curves across every area."""
     from common.sentry import init_sentry
     from stack.build_curve import build_window
 
@@ -457,12 +451,6 @@ def stack_run_daily() -> dict:
     today = datetime.now(tz=UTC).date()
     start = today - timedelta(days=_STACK_DAILY_LOOKBACK_DAYS)
     out = build_window(start, today)
-
-    try:
-        demo_daily.spawn()
-        out["demo_spawned"] = True
-    except Exception as e:  # noqa: BLE001
-        out["demo_spawned"] = f"error: {e}"
 
     # Daily regime-state inference. Cheap (~30s), keeps the dashboard's
     # Regime tab posteriors fresh between the weekly recalibration runs.
@@ -487,7 +475,8 @@ def stack_run_daily() -> dict:
 # ---------------------------------------------------------------------------
 
 # Not on its own schedule (would exceed Modal's 5-cron free-tier cap).
-# Spawned from stack_run_daily so it fires automatically every 06:30 JST.
+# Spawned only after the 07:00 JST forecast writes fresh Tokyo paths. Running
+# it from the 06:30 stack job binds every valuation to the previous day's run.
 # Operator can also run on demand:
 #   modal run apps/worker/modal_app.py::demo_daily_run
 @app.function(image=base_image, cpu=4.0, timeout=1800, secrets=_secrets)
@@ -702,12 +691,23 @@ def forecast_vlstm_run() -> dict:
 @app.function(image=base_image, cpu=2.0, timeout=600,
               schedule=_VLSTM_FORECAST_MORNING_CRON, secrets=_secrets)
 def forecast_vlstm_morning() -> dict:
-    """07:00 JST forecast — same body as `forecast_vlstm_run`."""
+    """Run the 07:00 JST forecast, then refresh demos from its Tokyo paths."""
     from common.sentry import init_sentry
     from vlstm.forecast import run_inference
 
     init_sentry()
-    return run_inference()
+    result = run_inference()
+    run_ids = result.get("run_ids")
+    if not isinstance(run_ids, dict) or "TK" not in run_ids:
+        result["demo_spawned"] = False
+        return result
+
+    try:
+        demo_daily.spawn()
+        result["demo_spawned"] = True
+    except Exception as e:  # noqa: BLE001
+        result["demo_spawned"] = f"error: {e}"
+    return result
 
 
 # Evening forecast schedule dropped 2026-05-13 to make room within Modal's

@@ -34,7 +34,7 @@ export async function GET() {
     return NextResponse.json(
       {
         error: "no demo backtests yet",
-        note: "first daily run hasn't completed — check back after the next 06:30 JST cron.",
+        note: "first daily run hasn't completed — check back after the next 07:00 JST forecast.",
       },
       { status: 404 },
     );

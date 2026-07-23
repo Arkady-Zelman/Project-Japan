@@ -232,8 +232,8 @@ export const DICTIONARY = {
   // ── Workbench page ───────────────────────────────────────────────────
   "workbench.title": { en: "Workbench", ja: "ワークベンチ" },
   "workbench.description": {
-    en: "Daily Boogert & de Jong Least-Squares Monte Carlo valuation of a 100 MWh / 50 MW Tokyo BESS against the latest VLSTM forecast paths. Refreshes automatically every morning at 06:30 JST after the day's ingest + stack build complete.",
-    ja: "100 MWh / 50 MW の東京BESSを最新のVLSTM予測パスに対してBoogert & de Jong最小二乗モンテカルロで日次評価します。毎朝06:30 JSTにその日の取込とスタック構築完了後に自動更新されます。",
+    en: "Daily Boogert & de Jong Least-Squares Monte Carlo valuation of a 100 MWh / 50 MW Tokyo BESS against the latest VLSTM forecast paths. Refreshes automatically after the 07:00 JST forecast completes.",
+    ja: "100 MWh / 50 MW の東京BESSを最新のVLSTM予測パスに対してBoogert & de Jong最小二乗モンテカルロで日次評価します。毎朝07:00 JSTの予測完了後に自動更新されます。",
   },
   "workbench.empty": {
     en: "The demo valuation hasn't run yet. The first cron firing after this deploy will populate it.",
