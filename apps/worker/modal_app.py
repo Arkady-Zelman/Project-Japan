@@ -94,20 +94,23 @@ def healthcheck() -> str:
     return "ok"
 
 
-def _prune_forecast_paths_impl(retain_latest_per_area: int = 2) -> dict:
-    """Bound generated forecast-path storage without deleting canonical data.
+@app.function(image=base_image, cpu=2.0, timeout=1800, secrets=_secrets)
+def prune_forecast_paths(retain_latest_per_area: int = 2) -> dict:
+    """Keep only forecast path rows for the latest N forecast_runs per area.
 
     1000 paths × 48 slots × 9 areas × N runs = 432K × N rows. With nothing
     pruning, that grows ~432K/day on the Supabase free tier (500 MB). Run
     nightly (or on-demand when disk fills) to keep the table bounded.
 
-    Keep the parent forecast_runs rows as immutable run metadata. Historical
-    valuations reference forecast_runs without ON DELETE CASCADE, and in-flight
-    valuations still need their forecast_paths while they are queued/running.
+    Forecast run parent rows are preserved as audit/model metadata and because
+    valuations.forecast_run_id references them. Active valuation inputs are
+    protected until their queued/running jobs finish.
     """
     from common.db import connect
 
-    retain_latest_per_area = max(1, int(retain_latest_per_area))
+    if retain_latest_per_area < 1:
+        raise ValueError("retain_latest_per_area must be at least 1")
+
     out: dict = {}
     with connect() as conn, conn.cursor() as cur:
         cur.execute("select pg_size_pretty(pg_database_size(current_database()))")
@@ -120,11 +123,8 @@ def _prune_forecast_paths_impl(retain_latest_per_area: int = 2) -> dict:
         n_runs_row = cur.fetchone()
         out["forecast_runs_before"] = int(n_runs_row[0]) if n_runs_row else 0
 
-        # Identify old run IDs whose generated path rows can be purged. Do not
-        # delete forecast_runs themselves: they are metadata and may be linked
-        # from historical valuations.
-        # Fetch IDs rather than doing one massive DELETE so each run's paths
-        # can commit separately and keep WAL pressure bounded near disk limits.
+        # Identify old runs whose path rows can be pruned. Keep parent
+        # forecast_runs metadata, and keep path rows for in-flight valuations.
         cur.execute(
             """
             with ranked as (
@@ -136,27 +136,44 @@ def _prune_forecast_paths_impl(retain_latest_per_area: int = 2) -> dict:
               from forecast_runs
             ),
             protected as (
-              select distinct forecast_run_id as id
+              select distinct forecast_run_id
               from valuations
               where forecast_run_id is not null
                 and status in ('queued', 'running')
             )
-            select r.id::text
-            from ranked r
-            where r.rn > %s
-              and not exists (select 1 from protected p where p.id = r.id)
+            select id::text from ranked where rn > %s
+              and not exists (
+                select 1 from protected p where p.forecast_run_id = ranked.id
+              )
             """,
             (retain_latest_per_area,),
         )
-        prune_ids = [row[0] for row in cur.fetchall()]
-        out["runs_with_paths_to_prune"] = len(prune_ids)
+        prune_ids = [r[0] for r in cur.fetchall()]
+        out["runs_to_prune"] = len(prune_ids)
+        # Back-compat for any operator scripts reading the old result shape.
+        out["runs_to_purge"] = len(prune_ids)
 
-        deleted_paths = 0
+        # Delete child rows one run at a time. This bounds WAL on near-full DBs
+        # while preserving forecast_runs rows referenced by valuations.
+        deleted = 0
         for run_id in prune_ids:
-            cur.execute("delete from forecast_paths where forecast_run_id = %s", (run_id,))
-            deleted_paths += cur.rowcount or 0
+            cur.execute(
+                """
+                delete from forecast_paths fp
+                where fp.forecast_run_id = %s
+                  and not exists (
+                    select 1
+                    from valuations v
+                    where v.forecast_run_id = fp.forecast_run_id
+                      and v.status in ('queued', 'running')
+                  )
+                """,
+                (run_id,),
+            )
+            deleted += cur.rowcount or 0
             conn.commit()
-        out["forecast_paths_deleted"] = deleted_paths
+        out["forecast_path_rows_deleted"] = deleted
+        out["runs_deleted"] = 0
 
         # Flush any open (even read-only) transaction so we can flip
         # autocommit — VACUUM cannot run inside a transaction block.
@@ -170,6 +187,7 @@ def _prune_forecast_paths_impl(retain_latest_per_area: int = 2) -> dict:
         conn2.autocommit = True
         with conn2.cursor() as cur2:
             cur2.execute("vacuum forecast_paths")
+            cur2.execute("vacuum forecast_runs")
 
             cur2.execute("select pg_size_pretty(pg_database_size(current_database()))")
             r = cur2.fetchone()
@@ -179,12 +197,6 @@ def _prune_forecast_paths_impl(retain_latest_per_area: int = 2) -> dict:
             out["forecast_paths_rows_after"] = int(r[0]) if r else 0
 
     return out
-
-
-@app.function(image=base_image, cpu=2.0, timeout=1800, secrets=_secrets)
-def prune_forecast_paths(retain_latest_per_area: int = 2) -> dict:
-    """Keep only the latest N generated forecast-path sets per area."""
-    return _prune_forecast_paths_impl(retain_latest_per_area=retain_latest_per_area)
 
 
 @app.function(image=base_image, cpu=2.0, timeout=3600, secrets=_secrets)
@@ -239,13 +251,14 @@ def vacuum_full_tables(tables_csv: str = "") -> dict:
 
 @app.function(image=base_image, cpu=2.0, timeout=3600, secrets=_secrets)
 def prune_old_data() -> dict:
-    """Backward-compatible safe retention entrypoint.
+    """Compatibility wrapper for the old retention entrypoint.
 
-    Historical actuals, stack curves, and regime states are canonical inputs for
-    calibration, lookbacks, and dashboards. Do not delete or truncate them from
-    scheduled retention; only generated forecast_paths are bounded nightly.
+    Historical market, stack, weather, and regime tables are canonical product
+    data used by dashboards, model calibration, and backtests. Retention may
+    only prune generated forecast path rows; callers that still invoke
+    prune_old_data get the safe forecast-only behavior.
     """
-    out = _prune_forecast_paths_impl(retain_latest_per_area=2)
+    out = prune_forecast_paths.local(retain_latest_per_area=2)
     print(f"prune_old_data result: {out}")
     return out
 
@@ -443,11 +456,12 @@ def ingest_backfill(
 # 21:30 UTC = 06:30 JST. Fires 30 min after `ingest_daily` so all the
 # input tables are fresh.
 _STACK_DAILY_CRON = modal.Cron("30 21 * * *")
+_STACK_DAILY_LOOKBACK_DAYS = 8
 
 
 @app.function(image=base_image, cpu=2.0, timeout=900, schedule=_STACK_DAILY_CRON, secrets=_secrets)
 def stack_run_daily() -> dict:
-    """Build merit-order curves for yesterday across every area.
+    """Build recent merit-order curves across every area.
 
     Also fires the public-demo refresh (`demo_daily`) so the /workbench and
     /lab pages always show last-24h results without needing a real user
@@ -459,8 +473,8 @@ def stack_run_daily() -> dict:
 
     init_sentry()
     today = datetime.now(tz=UTC).date()
-    yesterday = today - timedelta(days=1)
-    out = build_window(yesterday, today)
+    start = today - timedelta(days=_STACK_DAILY_LOOKBACK_DAYS)
+    out = build_window(start, today)
 
     try:
         demo_daily.spawn()
@@ -476,8 +490,8 @@ def stack_run_daily() -> dict:
     except Exception as e:  # noqa: BLE001
         out["regime_infer_spawned"] = f"error: {e}"
 
-    # Nightly retention sweep. Only generated forecast_paths are bounded here;
-    # actuals, stack curves, and regime_states are canonical model inputs.
+    # Nightly retention sweep. Prunes generated forecast path rows only; the
+    # canonical history tables feed dashboards, calibration, and backtests.
     try:
         prune_nightly.spawn()
         out["prune_spawned"] = True
@@ -510,18 +524,19 @@ def regime_infer_daily() -> dict:
     Regime tab's posteriors stay current between the weekly recalibrations.
     Operator can also run on demand: modal run modal_app.py::regime_infer_daily."""
     from datetime import UTC, datetime, timedelta
+
     from common.sentry import init_sentry
     from regime.infer_state import run_all
 
     init_sentry()
     today = datetime.now(tz=UTC).date()
-    return run_all(today - timedelta(days=2), today + timedelta(days=1))
+    return run_all(today - timedelta(days=14), today + timedelta(days=1))
 
 
 @app.function(image=base_image, cpu=2.0, timeout=3600, secrets=_secrets)
 def prune_nightly() -> dict:
-    """Nightly retention sweep spawned from stack_run_daily."""
-    return prune_old_data.local()
+    """Nightly forecast-path retention spawned from stack_run_daily."""
+    return prune_forecast_paths.local(retain_latest_per_area=2)
 
 
 @app.function(image=base_image, cpu=4.0, timeout=1800, secrets=_secrets)
