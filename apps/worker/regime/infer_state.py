@@ -37,6 +37,8 @@ from .pot import PeaksOverThreshold
 logger = logging.getLogger("regime.infer_state")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
+_MIN_INFER_RESIDUALS = 200
+
 
 def _load_active_model(cur: psycopg.Cursor, area_code: str) -> tuple[str, str, dict] | None:
     """Latest 'ready' MRS row for area. Returns (model_id, version, hyperparams) or None."""
@@ -100,7 +102,7 @@ def infer_area(
                 model_id, version, hp = active
 
                 resids = _load_residuals(cur, area_id, area_code, start, end)
-                if len(resids.residuals) < 50:
+                if len(resids.residuals) < _MIN_INFER_RESIDUALS:
                     run.set_output(
                         {"skipped": "insufficient_residuals", "n": int(len(resids.residuals))}
                     )
