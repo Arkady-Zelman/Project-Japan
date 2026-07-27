@@ -66,3 +66,12 @@ def test_daily_stack_build_restores_model_lookback() -> None:
     assert "_STACK_DAILY_LOOKBACK_DAYS = 8" in source
     assert "timedelta(days=_stack_daily_lookback_days)" in stack_source
     assert "timedelta(days=1)" not in stack_source
+
+
+def test_lsm_fails_closed_on_incomplete_or_stale_valuations() -> None:
+    runner = (WORKER_ROOT / "lsm" / "runner.py").read_text()
+
+    assert "incomplete forecast paths:" in runner
+    assert "expected queued" in runner
+    assert "and status in ('queued', 'running')" in runner
+    assert 'logger.warning(\n            "forecast_paths row count' not in runner
