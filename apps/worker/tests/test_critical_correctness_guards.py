@@ -75,3 +75,18 @@ def test_lsm_fails_closed_on_incomplete_or_stale_valuations() -> None:
     assert "expected queued" in runner
     assert "and status in ('queued', 'running')" in runner
     assert 'logger.warning(\n            "forecast_paths row count' not in runner
+
+
+def test_auth_callback_sanitizes_next_redirect() -> None:
+    repo_root = WORKER_ROOT.parents[1]
+    callback = (
+        repo_root / "apps/web/src/app/auth/callback/route.ts"
+    ).read_text(encoding="utf-8")
+    redirect_helper = (
+        repo_root / "apps/web/src/lib/auth/redirect.ts"
+    ).read_text(encoding="utf-8")
+
+    assert "sanitizeNextPath" in callback
+    assert "export function sanitizeNextPath" in redirect_helper
+    assert 'next.startsWith("/")' in redirect_helper
+    assert 'next.startsWith("//")' in redirect_helper
