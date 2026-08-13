@@ -48,7 +48,7 @@ def test_scheduled_retention_does_not_delete_canonical_tables() -> None:
 
 
 def test_forecast_path_retention_preserves_run_metadata() -> None:
-    retention_impl = _function_source("_prune_forecast_paths_impl").lower()
+    retention_impl = _function_source("prune_forecast_paths").lower()
 
     assert "delete from forecast_paths" in retention_impl
     assert "delete from forecast_runs" not in retention_impl
@@ -56,8 +56,10 @@ def test_forecast_path_retention_preserves_run_metadata() -> None:
 
 
 def test_forecast_path_retention_protects_in_flight_valuations() -> None:
-    retention_impl = _function_source("_prune_forecast_paths_impl").lower()
+    retention_impl = _function_source("prune_forecast_paths").lower()
 
     assert "from valuations" in retention_impl
     assert "forecast_run_id is not null" in retention_impl
-    assert "status in ('queued', 'running')" in retention_impl
+    # Re-check queued/running valuations both when selecting candidates and
+    # again in the DELETE, closing the selection-to-deletion race.
+    assert retention_impl.count("status in ('queued', 'running')") == 2
