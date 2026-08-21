@@ -205,6 +205,10 @@ def run_backtest(
         with connect() as conn, conn.cursor() as cur:
             advisory_lock(cur, f"backtest_{backtest_id}")
             row = _load_backtest_row(cur, backtest_id)
+            if row["status"] != "queued":
+                raise RuntimeError(
+                    f"backtest {backtest_id} is {row['status']}, expected queued"
+                )
             asset = _load_asset_spec(cur, row["asset_id"])
             area_id = _load_asset_area(cur, row["asset_id"])
             realised_kwh, stack_kwh, slot_starts = _load_window_prices(
@@ -312,7 +316,12 @@ def _mark_failed(backtest_id: UUID, error_text: str) -> None:
     try:
         with connect() as conn, conn.cursor() as cur:
             cur.execute(
-                "update backtests set status='failed', error=%s, completed_at=now() where id = %s",
+                """
+                update backtests
+                   set status='failed', error=%s, completed_at=now()
+                 where id = %s
+                   and status in ('queued', 'running')
+                """,
                 (error_text[:2000], str(backtest_id)),
             )
             conn.commit()
