@@ -77,6 +77,17 @@ def test_lsm_fails_closed_on_incomplete_or_stale_valuations() -> None:
     assert 'logger.warning(\n            "forecast_paths row count' not in runner
 
 
+def test_backtest_fails_closed_on_stale_rows() -> None:
+    runner = (WORKER_ROOT / "backtest" / "runner.py").read_text()
+
+    assert "expected queued" in runner
+    assert "and status in ('queued', 'running')" in runner
+    assert (
+        "update backtests set status='failed', error=%s, completed_at=now() where id = %s"
+        not in runner
+    )
+
+
 def test_auth_callback_sanitizes_next_redirect() -> None:
     repo_root = WORKER_ROOT.parents[1]
     callback = (
