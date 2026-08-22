@@ -235,9 +235,13 @@ def run_backtest(
         else:
             strategy = get_strategy(strategy_name)
         if strategy_name == "lsm_vlstm":
+            from .strategies import DEFAULT_LOOKAHEAD_SLOTS, DEFAULT_ROLL_INTERVAL_SLOTS
             from .vlstm_paths import load_vlstm_paths_per_origin
             vlstm_paths = load_vlstm_paths_per_origin(
-                area_id, slot_starts, lookahead_slots=48, roll_interval_slots=24,
+                area_id,
+                slot_starts,
+                lookahead_slots=DEFAULT_LOOKAHEAD_SLOTS,
+                roll_interval_slots=DEFAULT_ROLL_INTERVAL_SLOTS,
             )
             soc_mwh, actions_mwh = strategy.dispatch(  # type: ignore[call-arg]
                 asset, realised_kwh,

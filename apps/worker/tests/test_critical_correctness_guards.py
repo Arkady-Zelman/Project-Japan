@@ -88,6 +88,28 @@ def test_backtest_fails_closed_on_stale_rows() -> None:
     )
 
 
+def test_lsm_vlstm_uses_real_forecast_paths_schema_and_roll_cadence() -> None:
+    loader = (WORKER_ROOT / "backtest" / "vlstm_paths.py").read_text()
+    runner = (WORKER_ROOT / "backtest" / "runner.py").read_text()
+    strategies = (WORKER_ROOT / "backtest" / "strategies.py").read_text()
+    migration = (
+        WORKER_ROOT.parents[1]
+        / "supabase"
+        / "migrations"
+        / "008_backtests_lsm_vlstm_strategy.sql"
+    ).read_text()
+
+    assert "select path_id, slot_start, price_jpy_kwh" in loader
+    assert "where forecast_run_id = %s" in loader
+    assert "select path_index, slot_ix, price_jpy_kwh" not in loader
+    assert "where run_id = %s" not in loader
+    assert "DEFAULT_ROLL_INTERVAL_SLOTS = 2" in loader
+    assert "DEFAULT_ROLL_INTERVAL_SLOTS = 2" in strategies
+    assert "roll_interval_slots=DEFAULT_ROLL_INTERVAL_SLOTS" in runner
+    assert "roll_interval_slots=24" not in runner
+    assert "'lsm_vlstm'" in migration
+
+
 def test_auth_callback_sanitizes_next_redirect() -> None:
     repo_root = WORKER_ROOT.parents[1]
     callback = (
