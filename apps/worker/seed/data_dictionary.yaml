@@ -663,7 +663,7 @@
   description: FK to models.id when the strategy uses a model (e.g. lsm). Null for naive_spread.
 - table: backtests
   column: strategy
-  description: lsm | intrinsic | rolling_intrinsic | naive_spread.
+  description: lsm | intrinsic | rolling_intrinsic | naive_spread | lsm_vlstm.
 - table: backtests
   column: window_start
   description: Inclusive start of the replay window.
