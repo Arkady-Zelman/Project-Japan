@@ -443,18 +443,42 @@ def _parse_rows(
 
 
 def _months_between(start: date, end: date) -> list[tuple[int, int]]:
-    """List of (year, month) pairs touching [start, end), inclusive of months touched."""
+    """Months whose JST-dated TSO files can contain timestamps in [start, end) UTC.
+
+    TSO monthly CSVs are JST calendar months. UTC [D, D+1) includes
+    JST D 09:00–23:30 *and* JST (D+1) 00:00–08:30 (UTC D 15:00–23:30).
+    When `end` is the 1st of a month, that next-morning slice lives in
+    the following month's file, so `end`'s month must be included.
+    """
     out: list[tuple[int, int]] = []
     if end <= start:
         return out
-    last = end - timedelta(days=1)
     y, m = start.year, start.month
-    while (y, m) <= (last.year, last.month):
+    while (y, m) <= (end.year, end.month):
         out.append((y, m))
         m += 1
         if m == 13:
             y += 1
             m = 1
+    return out
+
+
+def _jst_dated_files_for_utc_window(start: date, end: date) -> list[date]:
+    """JST calendar dates whose 00:00–23:30 files overlap [start, end) UTC.
+
+    Daily TSO CSVs (e.g. Tohoku `realtime_jukyu_YYYYMMDD_02.csv`) are named
+    by JST date and contain that JST day only. UTC date D 00:00–14:30 is
+    JST D 09:00–23:30; UTC D 15:00–23:30 is JST D+1 00:00–08:30. Fetching
+    only `start` and filtering to the UTC day therefore permanently drops
+    17 half-hour slots every day.
+    """
+    if end <= start:
+        return []
+    out: list[date] = []
+    d = start
+    while d <= end:
+        out.append(d)
+        d += timedelta(days=1)
     return out
 
 
@@ -511,21 +535,20 @@ def fetch_for_area(
             covered_months.add((yyyy, mm))
 
     # 1b) Daily per-day fallback — only used when monthly didn't cover the
-    # month (e.g. Tohoku's monthly publication lags fiscal-year-end). One
-    # request per JST day in the window; tolerate 404s for days that haven't
-    # been published yet.
+    # month (e.g. Tohoku's monthly publication lags fiscal-year-end).
+    # Files are named by JST calendar date; fetch every JST date whose
+    # 00:00–23:30 window overlaps [start, end) UTC, then filter to that
+    # UTC window. Tolerate 404s for days that haven't been published yet.
     if src.daily_url_pattern:
         requested_months_before_daily = set(_months_between(start, end))
         missing_months_for_daily = requested_months_before_daily - covered_months
         if missing_months_for_daily:
-            day = start
-            while day < end:
-                month_key = (day.year, day.month)
+            for jst_day in _jst_dated_files_for_utc_window(start, end):
+                month_key = (jst_day.year, jst_day.month)
                 if month_key not in missing_months_for_daily:
-                    day += timedelta(days=1)
                     continue
                 url = src.daily_url_pattern.format(
-                    yyyy=day.year, mm=day.month, dd=day.day,
+                    yyyy=jst_day.year, mm=jst_day.month, dd=jst_day.day,
                 )
                 try:
                     text = _fetch_text_cached(url, src.encoding)
@@ -533,23 +556,19 @@ def fetch_for_area(
                     fmt = _pick_monthly_fmt(probe.shape[1])
                     if fmt is None:
                         errors.append(
-                            f"{area_code} {day.isoformat()} daily: unrecognized "
+                            f"{area_code} {jst_day.isoformat()} daily: unrecognized "
                             f"column count {probe.shape[1]} at {url}"
                         )
-                        day += timedelta(days=1)
                         continue
                     df = _read_csv_with_format(text, fmt, source_url=url)
                 except httpx.HTTPStatusError as e:
                     if e.response.status_code != 404:
-                        errors.append(f"{area_code} {day.isoformat()} daily: {e!r}")
-                    day += timedelta(days=1)
+                        errors.append(f"{area_code} {jst_day.isoformat()} daily: {e!r}")
                     continue
                 except Exception as e:
-                    errors.append(f"{area_code} {day.isoformat()} daily: {e!r}")
-                    day += timedelta(days=1)
+                    errors.append(f"{area_code} {jst_day.isoformat()} daily: {e!r}")
                     continue
-                rows.extend(_parse_rows(df, src, fmt, day, day + timedelta(days=1)))
-                day += timedelta(days=1)
+                rows.extend(_parse_rows(df, src, fmt, start, end))
 
     # 2) Annual per-fiscal-year, only for months not yet covered.
     if src.annual_url_pattern:
